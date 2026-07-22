@@ -1,0 +1,5 @@
+# Ignore all directories in contexts/
+*/
+# But allow _template directory and all its contents
+!/_template/
+!/_template/**

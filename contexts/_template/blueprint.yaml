@@ -1,0 +1,8 @@
+kind: Blueprint
+apiVersion: blueprints.windsorcli.dev/v1alpha1
+metadata:
+  name: manager
+  description: Management cluster blueprint layered on top of core
+sources: []
+terraform: []
+kustomize: []

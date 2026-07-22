@@ -1,0 +1,351 @@
+name: Claude Code Review
+on:
+  pull_request:
+    types: [opened, ready_for_review, synchronize]
+  issue_comment:
+    types: [created]
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+  id-token: write
+
+# The review step only READS the diff and WRITES two files:
+#   /tmp/summary-block.md      — sticky summary body (required)
+#   /tmp/review-comments.json  — inline findings, JSON array (optional)
+# A deterministic "Publish review" step then does every GitHub write via
+# .github/scripts/publish-review.sh. Publishing lives outside the model's
+# tool sandbox, so it can never be permission-denied mid-run and the summary
+# is guaranteed to post even if the review step errors or hits its turn cap.
+jobs:
+  review:
+    name: Full Review
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    if: >-
+      github.event_name == 'pull_request' &&
+      github.event.action != 'synchronize' &&
+      github.event.pull_request.user.type != 'Bot' &&
+      !contains(github.event.pull_request.labels.*.name, 'dependencies') &&
+      !github.event.pull_request.draft
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Fetch base ref
+        run: git fetch --depth=1 origin ${{ github.base_ref }}
+      - uses: anthropics/claude-code-action@b76a0776ae74036e77cd11018083743453d7ad35 # v1.0.179
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          BASE_REF: ${{ github.base_ref }}
+          GH_REPO: ${{ github.repository }}
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          prompt: |
+            Review this pull request and produce two output files. Do NOT post
+            anything to GitHub yourself — a later CI step publishes what you
+            write. Your only job is to write the files.
+
+            Scope strictly to the diff. Read the changed set with
+            `git diff "origin/$BASE_REF"...HEAD` (full history is checked out).
+            Do NOT read files outside the changed set unless flagging a
+            specific, concrete concern. Skip style nits; focus on correctness,
+            security, and blast radius.
+
+            ## Output 1 — /tmp/summary-block.md (REQUIRED, always write it)
+
+            A sticky summary of the whole PR as it stands now. Write ONLY the
+            callout body — no HTML comment markers, the publish step adds them.
+            Exact shape:
+
+              > [!NOTE]
+              >
+              > **{Low|Medium|High} Risk**
+              >
+              > {One sentence: what the change affects and why this risk level
+              > is appropriate.}
+              >
+              > **Overview**
+              >
+              > {2-3 sentences on what the PR does at the highest level — the
+              > shape of the change, not a file list.}
+              >
+              > {Optional second paragraph: the most notable behavioral or
+              > structural detail — a rename, a new default, a migration.}
+              >
+              > Reviewed by Claude for commit `<short SHA of PR_HEAD_SHA>`.
+
+            Tone: calm, specific, prose-first. No emojis, no bullet lists, no
+            "Test plan", under ~150 words. Risk level: Low for isolated,
+            reversible changes; Medium for shared infra/CLI/workflows or
+            changes to defaults; High for security, data-loss, or cross-cutting
+            changes. Write this file even when the PR is clean (say it's clean).
+
+            ## Output 2 — /tmp/review-comments.json (optional)
+
+            Inline, line-anchored findings as a JSON array. Omit the file, or
+            write `[]`, if there are no line-anchored findings. Each element:
+
+              {
+                "path": "relative/path.ext",
+                "line": 42,
+                "side": "RIGHT",
+                "body": "**{title}**\n\n_{Low|Medium|High} Severity_ · `path:line`\n\n{1-3 sentences on what's wrong and the concrete consequence}"
+              }
+
+            `line` must be a line present in the PR's current diff or GitHub
+            rejects the comment. For a multi-line span add `"start_line"` and
+            `"start_side": "RIGHT"`. Title: 4-10 words, imperative or
+            declarative, no trailing punctuation. Prefer a few high-signal
+            findings over many nits; if a finding can't be line-anchored, fold
+            it into the summary instead.
+
+            Write the two files and stop. Do not run `gh`, do not post, do not
+            edit the PR.
+          claude_args: |
+            --model claude-sonnet-4-6
+            --max-turns 40
+            --allowedTools "Read,Grep,Glob,Bash(git diff:*),Bash(git log:*),Write"
+            --disallowedTools WebSearch,WebFetch
+      - name: Publish review
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          # The publish script is CI infrastructure that lives on main, not in the
+          # PR's own tree — a PR branch opened or last pushed before this script was
+          # added won't have it. Always run main's copy regardless of what commit
+          # the checkout step left in the working directory.
+          git fetch --depth=1 origin main
+          git show origin/main:.github/scripts/publish-review.sh > /tmp/publish-review.sh
+          bash /tmp/publish-review.sh
+
+  review-on-comment:
+    name: Full Review (on-demand)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+      id-token: write
+    if: >-
+      github.event_name == 'issue_comment' &&
+      github.event.issue.pull_request &&
+      contains(github.event.comment.body, '/review')
+    steps:
+      - name: Get PR details
+        id: pr
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          PR_JSON=$(gh api repos/${{ github.repository }}/pulls/${{ github.event.issue.number }})
+          echo "head_sha=$(echo "$PR_JSON" | jq -r .head.sha)" >> "$GITHUB_OUTPUT"
+          echo "base_ref=$(echo "$PR_JSON" | jq -r .base.ref)" >> "$GITHUB_OUTPUT"
+          echo "head_ref=$(echo "$PR_JSON" | jq -r .head.ref)" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ steps.pr.outputs.head_ref }}
+          fetch-depth: 0
+      - name: Fetch base ref
+        run: git fetch --depth=1 origin ${{ steps.pr.outputs.base_ref }}
+      - uses: anthropics/claude-code-action@b76a0776ae74036e77cd11018083743453d7ad35 # v1.0.179
+        env:
+          PR_NUMBER: ${{ github.event.issue.number }}
+          PR_HEAD_SHA: ${{ steps.pr.outputs.head_sha }}
+          BASE_REF: ${{ steps.pr.outputs.base_ref }}
+          GH_REPO: ${{ github.repository }}
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          prompt: |
+            Review this pull request and produce two output files. Do NOT post
+            anything to GitHub yourself — a later CI step publishes what you
+            write. Your only job is to write the files.
+
+            Scope strictly to the diff. Read the changed set with
+            `git diff "origin/$BASE_REF"...HEAD` (full history is checked out).
+            Do NOT read files outside the changed set unless flagging a
+            specific, concrete concern. Skip style nits; focus on correctness,
+            security, and blast radius.
+
+            ## Output 1 — /tmp/summary-block.md (REQUIRED, always write it)
+
+            A sticky summary of the whole PR as it stands now. Write ONLY the
+            callout body — no HTML comment markers, the publish step adds them.
+            Exact shape:
+
+              > [!NOTE]
+              >
+              > **{Low|Medium|High} Risk**
+              >
+              > {One sentence: what the change affects and why this risk level
+              > is appropriate.}
+              >
+              > **Overview**
+              >
+              > {2-3 sentences on what the PR does at the highest level — the
+              > shape of the change, not a file list.}
+              >
+              > {Optional second paragraph: the most notable behavioral or
+              > structural detail — a rename, a new default, a migration.}
+              >
+              > Reviewed by Claude for commit `<short SHA of PR_HEAD_SHA>`.
+
+            Tone: calm, specific, prose-first. No emojis, no bullet lists, no
+            "Test plan", under ~150 words. Risk level: Low for isolated,
+            reversible changes; Medium for shared infra/CLI/workflows or
+            changes to defaults; High for security, data-loss, or cross-cutting
+            changes. Write this file even when the PR is clean (say it's clean).
+
+            ## Output 2 — /tmp/review-comments.json (optional)
+
+            Inline, line-anchored findings as a JSON array. Omit the file, or
+            write `[]`, if there are no line-anchored findings. Each element:
+
+              {
+                "path": "relative/path.ext",
+                "line": 42,
+                "side": "RIGHT",
+                "body": "**{title}**\n\n_{Low|Medium|High} Severity_ · `path:line`\n\n{1-3 sentences on what's wrong and the concrete consequence}"
+              }
+
+            `line` must be a line present in the PR's current diff or GitHub
+            rejects the comment. For a multi-line span add `"start_line"` and
+            `"start_side": "RIGHT"`. Title: 4-10 words, imperative or
+            declarative, no trailing punctuation. Prefer a few high-signal
+            findings over many nits; if a finding can't be line-anchored, fold
+            it into the summary instead.
+
+            Write the two files and stop. Do not run `gh`, do not post, do not
+            edit the PR.
+          claude_args: |
+            --model claude-sonnet-4-6
+            --max-turns 40
+            --allowedTools "Read,Grep,Glob,Bash(git diff:*),Bash(git log:*),Write"
+            --disallowedTools WebSearch,WebFetch
+      - name: Publish review
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.issue.number }}
+          PR_HEAD_SHA: ${{ steps.pr.outputs.head_sha }}
+        run: |
+          # The publish script is CI infrastructure that lives on main, not in the
+          # PR's own tree — a PR branch opened or last pushed before this script was
+          # added won't have it. Always run main's copy regardless of what commit
+          # the checkout step left in the working directory.
+          git fetch --depth=1 origin main
+          git show origin/main:.github/scripts/publish-review.sh > /tmp/publish-review.sh
+          bash /tmp/publish-review.sh
+
+  resolve-threads:
+    name: Resolve Threads
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    if: >-
+      github.event_name == 'pull_request' &&
+      github.event.action == 'synchronize' &&
+      github.event.pull_request.user.type != 'Bot' &&
+      !contains(github.event.pull_request.labels.*.name, 'dependencies') &&
+      !github.event.pull_request.draft
+    steps:
+      - name: Check for unresolved bot threads
+        id: check
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          OWNER="${GH_REPO%/*}"
+          REPO="${GH_REPO#*/}"
+          COUNT=$(gh api graphql -f query='
+            query($owner:String!,$repo:String!,$num:Int!){
+              repository(owner:$owner,name:$repo){
+                pullRequest(number:$num){
+                  reviewThreads(first:100){
+                    nodes{
+                      isResolved
+                      comments(first:1){ nodes{ author{ login } } }
+                    }
+                  }
+                }
+              }
+            }' -F owner="$OWNER" -F repo="$REPO" -F num="$PR_NUMBER" \
+            --jq '[.data.repository.pullRequest.reviewThreads.nodes[]
+                   | select(.isResolved == false)
+                   | select(.comments.nodes[0].author.login
+                       | test("\\[bot\\]$|^github-actions|^claude$"))]
+                   | length')
+          echo "count=$COUNT" >> "$GITHUB_OUTPUT"
+          echo "Unresolved bot threads: $COUNT"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: steps.check.outputs.count != '0'
+        with:
+          fetch-depth: 1
+      - uses: anthropics/claude-code-action@b76a0776ae74036e77cd11018083743453d7ad35 # v1.0.179
+        if: steps.check.outputs.count != '0'
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          GH_REPO: ${{ github.repository }}
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          show_full_output: true
+          prompt: |
+            Your only job is to identify which existing review threads on
+            this PR have been addressed. Do NOT call any GitHub write API
+            yourself — a later CI step resolves the threads you identify.
+            Do NOT post new findings or update the PR summary.
+
+            1. List unresolved review threads:
+
+              gh api graphql -f query='
+                query($owner:String!,$repo:String!,$num:Int!){
+                  repository(owner:$owner,name:$repo){
+                    pullRequest(number:$num){
+                      reviewThreads(first:100){
+                        nodes{
+                          id isResolved isOutdated
+                          comments(first:1){ nodes{ author{login} path line body } }
+                        }
+                      }
+                    }
+                  }
+                }' -F owner="${GH_REPO%/*}" -F repo="${GH_REPO#*/}" -F num="$PR_NUMBER"
+
+            2. For each unresolved thread authored by the bot (login ending
+               in `[bot]`, `github-actions`, or `claude`):
+               - If `isOutdated: true`, it qualifies.
+               - Otherwise, read the file at the commented path/line and
+                 check whether the specific concern is still present. If
+                 fixed, it qualifies.
+               - If a human has replied to the thread, leave it alone — it
+                 does not qualify.
+
+            3. Write the id of every qualifying thread, one per line, to
+               /tmp/resolve-thread-ids.txt. Write an empty file if none
+               qualify.
+
+            That is all. Do not run any `gh api graphql` mutation. Do not
+            post comments. Do not modify the PR description. Be fast.
+          claude_args: |
+            --model claude-sonnet-4-6
+            --max-turns 15
+            --allowedTools "Read,Grep,Glob,Bash(git diff:*),Bash(git log:*),Bash(gh api:*),Bash(cat:*),Bash(jq:*),Write"
+            --disallowedTools WebSearch,WebFetch
+      - name: Resolve identified threads
+        if: always() && steps.check.outputs.count != '0'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          # Same reasoning as "Publish review": always run main's copy so a
+          # PR branch opened or last pushed before this script was added
+          # still gets it.
+          git fetch --depth=1 origin main
+          git show origin/main:.github/scripts/resolve-threads.sh > /tmp/resolve-threads.sh
+          bash /tmp/resolve-threads.sh
