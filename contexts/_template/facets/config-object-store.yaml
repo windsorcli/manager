@@ -5,7 +5,7 @@ metadata:
   description: Resolves the object storage backend for the platform and provisions its buckets
 
 # Resolves before the services that consume it, and after Core's platform layers that
-# supply platform, hetzner.location, and aws.region.
+# supply platform, hetzner.object_storage.location, and aws.region.
 ordinal: 450
 
 # =============================================================================
@@ -27,8 +27,10 @@ config:
     when: platform == 'hetzner'
     value:
       driver: hetzner
-      endpoint: "https://${hetzner.location ?? 'fsn1'}.your-objectstorage.com"
-      region: "${hetzner.location ?? 'fsn1'}"
+      # Object Storage runs in fsn1, nbg1, and hel1 only, so its location is set
+      # independently of where the servers run.
+      endpoint: "https://${hetzner.object_storage.location ?? 'fsn1'}.your-objectstorage.com"
+      region: "${hetzner.object_storage.location ?? 'fsn1'}"
 
   - name: object_store
     when: platform == 'aws'
@@ -74,7 +76,7 @@ terraform:
     inputs:
       access_key: ${hetzner.object_storage.access_key}
       secret_key: ${hetzner.object_storage.secret_key}
-      location: "${hetzner.location ?? 'fsn1'}"
+      location: "${hetzner.object_storage.location ?? 'fsn1'}"
       buckets:
         - "${object_store.prefix}-image-factory"
 

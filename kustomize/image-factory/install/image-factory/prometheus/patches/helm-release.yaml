@@ -1,0 +1,14 @@
+# Metrics listen on :2122. The chart leaves the Service off, so enable it alongside
+# the ServiceMonitor. Patched at /spec/values/service because the base sets no
+# service block; Helm merges these over the chart's own service defaults.
+- op: add
+  path: /spec/values/service
+  value:
+    metrics:
+      enabled: true
+      service:
+        type: ClusterIP
+        servicePort: 2122
+      serviceMonitor:
+        enabled: true
+        interval: 30s

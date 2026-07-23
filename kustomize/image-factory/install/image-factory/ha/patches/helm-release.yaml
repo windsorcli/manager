@@ -1,0 +1,15 @@
+# Redundancy against node loss; the Recreate strategy still gaps on rollout.
+- op: add
+  path: /spec/values/replicaCount
+  value: 2
+- op: add
+  path: /spec/values/affinity
+  value:
+    podAntiAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 100
+          podAffinityTerm:
+            labelSelector:
+              matchLabels:
+                app.kubernetes.io/name: image-factory
+            topologyKey: kubernetes.io/hostname

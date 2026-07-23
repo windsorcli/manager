@@ -1,0 +1,8 @@
+# Durable storage for schematics and cached assets. Without it a restart loses every
+# schematic id the factory has handed out, and every cached asset rebuilds.
+- op: replace
+  path: /spec/template/spec/volumes/1
+  value:
+    name: data
+    persistentVolumeClaim:
+      claimName: registry

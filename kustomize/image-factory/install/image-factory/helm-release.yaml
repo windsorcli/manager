@@ -1,0 +1,61 @@
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: image-factory
+  namespace: image-factory
+spec:
+  interval: 5m
+  timeout: 10m
+  targetNamespace: image-factory
+  install:
+    createNamespace: false
+    remediation:
+      retries: 3
+  upgrade:
+    remediation:
+      retries: 3
+  chart:
+    spec:
+      chart: image-factory
+      # renovate: datasource=docker depName=image-factory-chart package=ghcr.io/siderolabs/charts/image-factory
+      version: 1.4.0
+      sourceRef:
+        kind: HelmRepository
+        name: siderolabs
+  values:
+    # Without this the chart names everything <release>-<chart>, so the Service the
+    # HTTPRoute points at would be image-factory-image-factory.
+    fullnameOverride: image-factory
+    image:
+      repository: ghcr.io/siderolabs/image-factory
+      # renovate: datasource=docker depName=image-factory package=ghcr.io/siderolabs/image-factory
+      tag: v1.4.0@sha256:5d6ca709ac74f03f4684ecc2dd14a4fc493ef2c84f8ffb930511f4f280c7e7c9
+    # The chart supports only the Recreate strategy.
+    strategy:
+      type: Recreate
+    config:
+      artifacts:
+        schematic:
+          registry: ${factory_schematic_registry}
+          namespace: ${factory_schematic_namespace:-siderolabs/image-factory}
+          repository: ${factory_schematic_repository:-schematics}
+          insecure: ${factory_schematic_insecure:-false}
+      cache:
+        oci:
+          registry: ${factory_cache_registry}
+          namespace: ${factory_cache_namespace:-image-factory}
+          repository: ${factory_cache_repository:-cache}
+          insecure: ${factory_cache_insecure:-false}
+      build:
+        maxConcurrency: ${factory_max_concurrency:-6}
+        minTalosVersion: ${factory_min_talos_version:-1.2.0}
+      http:
+        externalURL: ${factory_external_url}/
+    # Materialized by the facet's secrets: block, data key `cache-signing.key`.
+    cacheSigningKey:
+      existingSecret: image-factory-cache-signing-key
+    resources:
+      requests:
+        cpu: 500m
+        memory: 1Gi
