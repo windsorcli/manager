@@ -75,11 +75,6 @@ flux:
         - "${topology == 'ha' ? 'image-factory/ha' : ''}"
         - "${(telemetry.metrics.enabled ?? false) == true ? 'image-factory/prometheus' : ''}"
       substitutions:
-        probe_gateway_domain: "${gateway_effective.external_domain}"
-        probe_object_store_driver: "${object_store.driver}"
-        probe_object_store_prefix: "${object_store.prefix}"
-        probe_cert_issuer: "${cert_effective.public_issuer}"
-        probe_lb: "${lb_effective.mode}"
         # Names the bucket config-object-store provisions, so the two stay in step.
         registry_bucket: "windsor-${id}-image-factory"
         registry_region: >-
