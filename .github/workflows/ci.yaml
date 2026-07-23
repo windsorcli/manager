@@ -248,10 +248,14 @@ jobs:
       - name: Show blueprint
         run: windsor show blueprint
 
+      # No --verbose. It makes ExecSilent stream, and `terraform output -json` goes
+      # through ExecSilent, so the signing key this blueprint generates is printed to a
+      # public log in cleartext despite being marked sensitive. See windsorcli/cli#3056.
+      # The diagnostics step below covers what --verbose would have shown on a failure.
       - name: Windsor Up
         id: windsor_up
         timeout-minutes: 25
-        run: windsor up --verbose --wait
+        run: windsor up --wait
 
       # `windsor up --wait` returns once kustomizations reconcile; this pins down that the
       # factory in particular is serving, rather than merely applied.

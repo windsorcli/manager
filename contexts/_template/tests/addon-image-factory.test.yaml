@@ -56,6 +56,12 @@ cases:
           install:
             components:
               - image-factory
+            substitutions:
+              probe_gateway_domain: PROBE
+              probe_object_store_driver: PROBE
+              probe_object_store_prefix: PROBE
+              probe_cert_issuer: PROBE
+              probe_lb: PROBE
             timeout: 10m
             interval: 5m
           resources:
