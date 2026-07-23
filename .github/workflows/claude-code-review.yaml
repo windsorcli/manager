@@ -247,6 +247,13 @@ jobs:
     name: Resolve Threads
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    # resolveReviewThread needs contents: write on top of pull-requests: write.
+    # With the workflow-level contents: read the mutation returns "Resource not
+    # accessible by integration" and the thread stays open.
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
     if: >-
       github.event_name == 'pull_request' &&
       github.event.action == 'synchronize' &&
