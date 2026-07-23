@@ -249,11 +249,14 @@ jobs:
     timeout-minutes: 10
     # resolveReviewThread needs contents: write on top of pull-requests: write.
     # With the workflow-level contents: read the mutation returns "Resource not
-    # accessible by integration" and the thread stays open.
+    # accessible by integration" and the thread stays open. A job-level block replaces
+    # the workflow-level one outright rather than merging, so id-token: write has to be
+    # repeated here — claude-code-action fetches an OIDC token and fails without it.
     permissions:
       contents: write
       pull-requests: write
       issues: write
+      id-token: write
     if: >-
       github.event_name == 'pull_request' &&
       github.event.action == 'synchronize' &&
