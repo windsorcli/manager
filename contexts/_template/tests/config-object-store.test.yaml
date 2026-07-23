@@ -1,6 +1,7 @@
 # config-object-store.yaml facet tests
-# Covers the driver each platform resolves to. Bucket provisioning is gated on a consumer
-# asking for it, so these assert resolution, not components.
+# Bucket provisioning is gated on a consumer asking for it, so the aws case enables the
+# image factory to make the module selectable and then asserts its inputs — that is the
+# only case here that can fail. See the note above the two that follow it.
 
 x-defaults:
   network: &default-network
@@ -24,7 +25,36 @@ x-defaults:
         - /var/mnt/local
 
 cases:
+  # Buckets are only provisioned where the platform has object storage and something asks
+  # for them, so this is the case that shows driver and prefix actually resolved: the
+  # module is selected, and its inputs carry the region and the derived bucket name.
+  - name: provisions a bucket on aws when a consumer asks for one
+    values:
+      id: tst1
+      platform: aws
+      network: *default-network
+      cluster: *default-cluster
+      aws:
+        region: us-west-2
+      addons:
+        image_factory:
+          enabled: true
+    expect:
+      terraform:
+        - name: object-store
+          path: object-store/aws
+          inputs:
+            region: us-west-2
+            buckets:
+              - windsor-tst1-image-factory
+
   # No managed object storage and no in-cluster operator: nothing to provision.
+  #
+  # This and the minio case below assert an empty terraform list, which the runner
+  # subset-matches — an empty expectation holds against any actual list, so neither case
+  # can fail. They document intent only. What proves a minio driver resolved is the
+  # registry landing on a PVC in addon-image-factory.test.yaml; what proves hetzner and
+  # aws resolve is the case above. A real negative here needs absence assertions.
   - name: resolves to no object store on a bare platform
     values:
       platform: metal

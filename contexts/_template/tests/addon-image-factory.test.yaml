@@ -146,7 +146,10 @@ cases:
               - registry
               - registry/pvc
             substitutions:
-              registry_endpoint: ""
+              # Resolved, but unread: registry/s3 is the only component that consumes it,
+              # and the pvc branch is what a minio driver selects.
+              registry_endpoint: https://minio.system-object-store.svc:9000
+              registry_replicas: "1"
 
   # There is no hetzner case here. core:latest ships no platform-hetzner.yaml, so
   # `platform: hetzner` fails to compose ("cni depends on non-existent component
