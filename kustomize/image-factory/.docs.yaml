@@ -27,13 +27,13 @@ substitutions:
     description: "Oldest Talos release assets are generated for. Defaults to `1.2.0`."
   registry_bucket:
     required_when: "`registry/s3`"
-    description: "Bucket backing the in-cluster registry. Named `windsor-<id>-image-factory`, matching the bucket the object-store Terraform module provisions."
+    description: "Bucket backing the in-cluster registry. Built from `object_store.prefix`, the same expression that names the bucket the object-store Terraform module provisions."
   registry_region:
     required_when: "`registry/s3`"
-    description: "Region embedded in the S3 v4 signature. The Hetzner object storage location, or the AWS region."
+    description: "Region embedded in the S3 v4 signature, from `object_store.region` — the Hetzner object storage location, or the AWS region."
   registry_endpoint:
     required_when: "`registry/s3`"
-    description: "S3 endpoint the registry writes to, derived from the platform and its location."
+    description: "S3 endpoint the registry writes to, from `object_store.endpoint`."
   registry_storage_class:
     required_when: "`registry/pvc`"
     description: "Storage class for the registry volume. Defaults to `cluster.storage.class`, or `single`."
@@ -49,10 +49,10 @@ components:
     enable_when: "no external schematic registry is named"
     description: "In-cluster OCI registry (`distribution`) holding schematics and cached boot assets. Reached at `registry.image-factory.svc.cluster.local:5000` over plain HTTP; no route, and a NetworkPolicy admits only the factory pod on 5000."
   registry/pvc:
-    enable_when: "the platform is neither `hetzner` nor `aws`"
+    enable_when: "`object_store.driver` is neither `hetzner` nor `aws`"
     description: "Backs the registry with a PersistentVolumeClaim on the default storage class. Without it the registry is an emptyDir, and a restart loses every schematic id already handed out."
   registry/s3:
-    enable_when: "`platform` is `hetzner` or `aws`"
+    enable_when: "`object_store.driver` is `hetzner` or `aws`"
     description: "Backs the registry with a bucket from the platform's object store instead of a volume. Limited to the platforms the registry holds credentials for: Hetzner keys come from `hetzner.object_storage`, and on AWS an empty key pair leaves the S3 driver on the instance credential chain. A minio object store stays on a PVC until credentials for one exist."
 
   image-factory:

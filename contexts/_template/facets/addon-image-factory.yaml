@@ -46,11 +46,6 @@ terraform:
 # chain. Core's minio addon creates no Tenant and the schema carries no keys for one, so
 # a minio object store stays on a PVC until those credentials exist.
 #
-# Whether an object store exists is derived inline from platform rather than read from
-# config-object-store's object_store. A config value set by one facet reads back nil in
-# another, and a nil driver compares unequal to 'none', which selects registry/pvc on
-# platforms that have buckets. See windsorcli/cli#3050.
-#
 flux:
 
   - name: image-factory
@@ -70,24 +65,19 @@ flux:
       components:
         - image-factory
         - "${(addons.image_factory.registry.schematic.registry ?? '') == '' ? 'registry' : ''}"
-        - "${(addons.image_factory.registry.schematic.registry ?? '') == '' && (platform == 'hetzner' || platform == 'aws') ? 'registry/s3' : ''}"
-        - "${(addons.image_factory.registry.schematic.registry ?? '') == '' && platform != 'hetzner' && platform != 'aws' ? 'registry/pvc' : ''}"
+        - "${(addons.image_factory.registry.schematic.registry ?? '') == '' && (object_store.driver == 'hetzner' || object_store.driver == 'aws') ? 'registry/s3' : ''}"
+        - "${(addons.image_factory.registry.schematic.registry ?? '') == '' && object_store.driver != 'hetzner' && object_store.driver != 'aws' ? 'registry/pvc' : ''}"
         - "${topology == 'ha' ? 'image-factory/ha' : ''}"
         - "${(telemetry.metrics.enabled ?? false) == true ? 'image-factory/prometheus' : ''}"
       substitutions:
-        # Names the bucket config-object-store provisions, so the two stay in step.
-        registry_bucket: "windsor-${id}-image-factory"
-        registry_region: >-
-          ${platform == 'hetzner' ? (hetzner.object_storage.location ?? 'fsn1')
-            : platform == 'aws' ? aws.region
-            : ''}
-        registry_endpoint: >-
-          ${platform == 'hetzner' ? 'https://' + (hetzner.object_storage.location ?? 'fsn1') + '.your-objectstorage.com'
-            : platform == 'aws' ? 'https://s3.' + aws.region + '.amazonaws.com'
-            : ''}
+        # The same expression config-object-store hands the bucket module, so the
+        # registry and the bucket that gets provisioned cannot drift apart.
+        registry_bucket: "${object_store.prefix}-image-factory"
+        registry_region: "${object_store.region ?? ''}"
+        registry_endpoint: "${object_store.endpoint ?? ''}"
         registry_storage_class: "${cluster.storage.class ?? 'single'}"
         registry_storage_size: "${addons.image_factory.registry_size ?? '10Gi'}"
-        registry_replicas: "${topology == 'ha' && (platform == 'hetzner' || platform == 'aws') ? 2 : 1}"
+        registry_replicas: "${topology == 'ha' && (object_store.driver == 'hetzner' || object_store.driver == 'aws') ? 2 : 1}"
         external_domain: "${(dns.public_domain ?? '') == '' ? (dns.private_domain ?? dns.domain ?? '') : dns.public_domain}"
         # Explicit override wins; else derive from the domain the route publishes on.
         # docker-desktop reaches the gateway on 8443 rather than 443.

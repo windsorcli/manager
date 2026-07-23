@@ -93,9 +93,9 @@ reaching for them:
 | `factory_schematic_insecure` | optional | Allow HTTP or invalid TLS to the schematic registry. Defaults to `false`. |
 | `factory_max_concurrency` | optional | Simultaneous asset builds. Defaults to `6`; each build is CPU-bound, so raise it with the node pool rather than ahead of it. |
 | `factory_min_talos_version` | optional | Oldest Talos release assets are generated for. Defaults to `1.2.0`. |
-| `registry_bucket` | `registry/s3` | Bucket backing the in-cluster registry. Named `windsor-<id>-image-factory`, matching the bucket the object-store Terraform module provisions. |
-| `registry_region` | `registry/s3` | Region embedded in the S3 v4 signature. The Hetzner object storage location, or the AWS region. |
-| `registry_endpoint` | `registry/s3` | S3 endpoint the registry writes to, derived from the platform and its location. |
+| `registry_bucket` | `registry/s3` | Bucket backing the in-cluster registry. Built from `object_store.prefix`, the same expression that names the bucket the object-store Terraform module provisions. |
+| `registry_region` | `registry/s3` | Region embedded in the S3 v4 signature, from `object_store.region` — the Hetzner object storage location, or the AWS region. |
+| `registry_endpoint` | `registry/s3` | S3 endpoint the registry writes to, from `object_store.endpoint`. |
 | `registry_storage_class` | `registry/pvc` | Storage class for the registry volume. Defaults to `cluster.storage.class`, or `single`. |
 | `registry_storage_size` | `registry/pvc` | Size of the registry volume. Defaults to `10Gi`. |
 | `registry_replicas` | optional | Registry replicas. Two on `topology: ha` where a bucket backs it, otherwise one — a PVC cannot be shared across replicas. |
@@ -105,8 +105,8 @@ reaching for them:
 | Component | Enable when | Effect |
 |---|---|---|
 | `registry` | no external schematic registry is named | In-cluster OCI registry (`distribution`) holding schematics and cached boot assets. Reached at `registry.image-factory.svc.cluster.local:5000` over plain HTTP; no route, and a NetworkPolicy admits only the factory pod on 5000. |
-| `registry/pvc` | the platform is neither `hetzner` nor `aws` | Backs the registry with a PersistentVolumeClaim on the default storage class. Without it the registry is an emptyDir, and a restart loses every schematic id already handed out. |
-| `registry/s3` | `platform` is `hetzner` or `aws` | Backs the registry with a bucket from the platform's object store instead of a volume. Limited to the platforms the registry holds credentials for: Hetzner keys come from `hetzner.object_storage`, and on AWS an empty key pair leaves the S3 driver on the instance credential chain. A minio object store stays on a PVC until credentials for one exist. |
+| `registry/pvc` | `object_store.driver` is neither `hetzner` nor `aws` | Backs the registry with a PersistentVolumeClaim on the default storage class. Without it the registry is an emptyDir, and a restart loses every schematic id already handed out. |
+| `registry/s3` | `object_store.driver` is `hetzner` or `aws` | Backs the registry with a bucket from the platform's object store instead of a volume. Limited to the platforms the registry holds credentials for: Hetzner keys come from `hetzner.object_storage`, and on AWS an empty key pair leaves the S3 driver on the instance credential chain. A minio object store stays on a PVC until credentials for one exist. |
 | `image-factory` | `addons.image_factory.enabled == true` | Helm release of the Sidero Labs `image-factory` chart in `image-factory`, from `oci://ghcr.io/siderolabs/charts`. Serves the UI, API, and registry frontends on :8080. Runs as uid 1000, non-root, baseline PSA-compatible. The chart supports only the Recreate deployment strategy. |
 | `image-factory/ha` | `topology == 'ha'` | Two replicas with pod anti-affinity across nodes. Redundancy against node loss only — the Recreate strategy means rollouts still have a gap. Safe because builds are stateless: schematics live in the registry, cached assets in the cache backend. |
 | `image-factory/prometheus` | `telemetry.metrics.enabled == true` | Metrics Service on :2122 plus a ServiceMonitor. Both are needed — the chart leaves the metrics Service off by default, so a ServiceMonitor alone would have nothing to scrape. |
