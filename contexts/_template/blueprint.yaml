@@ -3,6 +3,9 @@ apiVersion: blueprints.windsorcli.dev/v1alpha1
 metadata:
   name: manager
   description: Management cluster blueprint layered on top of core
-sources: []
+sources:
+  - name: core
+    url: oci://ghcr.io/windsorcli/core:latest
+    install: true
 terraform: []
 kustomize: []
