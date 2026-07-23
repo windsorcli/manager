@@ -9,7 +9,11 @@
 # The Windsor CLI is installed from windsorcli/action at ref main rather than a release.
 # The blueprint lists sources and owns its facets, a shape that silently loaded no local
 # facets before windsorcli/cli#3048, and that fix is not in a release yet. Pin this to a
-# tag once one ships that carries it.
+# tag once one ships that carries it — and that also carries windsorcli/cli#3057, which
+# stopped `terraform output -json` streaming under --verbose. Before that fix, the signing
+# key this blueprint generates was printed to a public log in cleartext despite being
+# marked sensitive, so pinning back past it while `windsor up --verbose` stands would
+# reintroduce the leak.
 name: CI
 
 on:
@@ -236,6 +240,20 @@ jobs:
           ref: main
           context: local
 
+      # Windsor's registry mirrors write pulled layers here, so a warm cache saves the
+      # cluster re-pulling k8s, Cilium and the image-factory images on every run. The
+      # directory has to exist before actions/cache restores into it.
+      - name: Create docker cache directory
+        run: mkdir -p .windsor/cache/docker
+
+      - name: Cache docker cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .windsor/cache/docker
+          key: docker-cache-${{ runner.os }}-${{ github.sha }}
+          restore-keys: |
+            docker-cache-${{ runner.os }}-
+
       # The image factory is off by default, so without --set this would bring up a bare
       # Core cluster and assert nothing about what this repo adds. dns.domain matches what
       # the add-on's route is published under.
@@ -248,14 +266,10 @@ jobs:
       - name: Show blueprint
         run: windsor show blueprint
 
-      # No --verbose. It makes ExecSilent stream, and `terraform output -json` goes
-      # through ExecSilent, so the signing key this blueprint generates is printed to a
-      # public log in cleartext despite being marked sensitive. See windsorcli/cli#3056.
-      # The diagnostics step below covers what --verbose would have shown on a failure.
       - name: Windsor Up
         id: windsor_up
         timeout-minutes: 25
-        run: windsor up --wait
+        run: windsor up --verbose --wait
 
       # `windsor up --wait` returns once kustomizations reconcile; this pins down that the
       # factory in particular is serving, rather than merely applied.
