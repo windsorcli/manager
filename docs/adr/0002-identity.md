@@ -38,7 +38,7 @@ configuration surface today is four keys — `addons.keycloak.{enabled, driver, 
 image}`. The hostname defaults to `keycloak.<public_domain || private_domain>`.
 
 **Core's PR 2 plan does not stop at the server — it builds the identity a single cluster
-needs.** Core's [keycloak-idp plan](../../../core/docs/plans/keycloak-idp.md) takes the
+needs.** Core's keycloak-idp plan (in the `core` repo, `docs/plans/keycloak-idp.md`) takes the
 server the rest of the way to a working provider, and it is deliberately universal, not
 fleet-specific. Its principle: *Core ships the mechanism plus a thin, opt-out baseline, and
 everything else extends through the same CRDs.* Concretely, Core will build:
