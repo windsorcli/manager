@@ -1,0 +1,87 @@
+kind: Facet
+apiVersion: blueprints.windsorcli.dev/v1alpha1
+metadata:
+  name: object-store
+  description: Resolves the object storage backend for the platform and provisions its buckets
+
+# Resolves before the services that consume it, and after Core's platform layers that
+# supply platform, hetzner.location, and aws.region.
+ordinal: 450
+
+# =============================================================================
+# Config — effective object store
+# =============================================================================
+# driver: hetzner and aws provision buckets in the platform's own object storage; minio
+# uses Core's in-cluster operator, which installs no Tenant, so its endpoint stays an
+# operator input; none means no bucket-backed storage is available.
+config:
+
+  - name: object_store
+    value:
+      driver: none
+      endpoint: ""
+      region: ""
+      prefix: "windsor-${id}"
+
+  - name: object_store
+    when: platform == 'hetzner'
+    value:
+      driver: hetzner
+      endpoint: "https://${hetzner.location ?? 'fsn1'}.your-objectstorage.com"
+      region: "${hetzner.location ?? 'fsn1'}"
+
+  - name: object_store
+    when: platform == 'aws'
+    value:
+      driver: aws
+      endpoint: "https://s3.${aws.region}.amazonaws.com"
+      region: "${aws.region}"
+
+  - name: object_store
+    when: platform != 'hetzner' && platform != 'aws' && (addons.object_store.enabled ?? false) == true
+    value:
+      driver: minio
+      endpoint: "${addons.object_store.endpoint ?? ''}"
+      region: ""
+
+# =============================================================================
+# Requires
+# =============================================================================
+requires:
+  - when: object_store.driver == 'hetzner' && (addons.image_factory.enabled ?? false) == true
+    paths:
+      - hetzner.object_storage.access_key
+      - hetzner.object_storage.secret_key
+    message: >-
+      Hetzner issues S3 credentials from the console only, so they cannot be provisioned.
+      Create a key pair for the project and set both values.
+
+  - when: object_store.driver == 'minio' && (addons.image_factory.enabled ?? false) == true
+    paths:
+      - addons.object_store.endpoint
+    message: >-
+      Core's object store addon installs the MinIO operator but creates no Tenant, so the
+      S3 endpoint of the Tenant serving these buckets has to be given explicitly.
+
+# =============================================================================
+# Terraform — buckets
+# =============================================================================
+terraform:
+
+  - name: object-store
+    path: object-store/hetzner
+    when: object_store.driver == 'hetzner' && (addons.image_factory.enabled ?? false) == true
+    inputs:
+      access_key: ${hetzner.object_storage.access_key}
+      secret_key: ${hetzner.object_storage.secret_key}
+      location: "${hetzner.location ?? 'fsn1'}"
+      buckets:
+        - "${object_store.prefix}-image-factory"
+
+  - name: object-store
+    path: object-store/aws
+    when: object_store.driver == 'aws' && (addons.image_factory.enabled ?? false) == true
+    inputs:
+      region: ${aws.region}
+      buckets:
+        - "${object_store.prefix}-image-factory"

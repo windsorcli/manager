@@ -1,0 +1,48 @@
+# config-object-store.yaml facet tests
+# Covers the driver each platform resolves to. Bucket provisioning is gated on a consumer
+# asking for it, so these assert resolution, not components.
+
+x-defaults:
+  network: &default-network
+    cidr_block: 10.5.0.0/16
+    loadbalancer_driver: kube-vip
+    loadbalancer_mode: arp
+    loadbalancer_ips:
+      start: "10.5.1.10"
+      end: "10.5.1.100"
+
+  cluster: &default-cluster
+    driver: talos
+    controlplanes:
+      nodes:
+        controlplane-1:
+          endpoint: 10.5.0.10:50000
+          node: 10.5.0.10
+          hostname: controlplane-1
+    workers:
+      volumes:
+        - /var/mnt/local
+
+cases:
+  # No managed object storage and no in-cluster operator: nothing to provision.
+  - name: resolves to no object store on a bare platform
+    values:
+      platform: metal
+      network: *default-network
+      cluster: *default-cluster
+    expect:
+      terraform: []
+
+  # Core's operator standing in for a managed backend.
+  - name: resolves to minio when the core addon is enabled
+    values:
+      platform: metal
+      network: *default-network
+      cluster: *default-cluster
+      addons:
+        object_store:
+          enabled: true
+          driver: minio
+          endpoint: https://minio.system-object-store.svc:9000
+    expect:
+      terraform: []
