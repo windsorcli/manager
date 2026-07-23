@@ -28,23 +28,28 @@ terraform:
 # =============================================================================
 # Flux system — image factory
 # =============================================================================
-# pki-install issues the TLS certificate, gateway-install supplies the route CRDs, and
-# object-store backs the S3 cache.
+# pki-install issues the TLS certificate and gateway-install supplies the route CRDs.
 #
 # Conditional components:
 #   - registry:                in-cluster OCI registry holding schematics and cached
 #                              assets, unless an external registry is named.
-#   - registry/s3:             bucket-backed registry storage where object storage exists.
-#   - registry/pvc:            a PVC on the default class where it does not.
+#   - registry/s3:             bucket-backed registry storage on platforms whose object
+#                              store the registry holds credentials for.
+#   - registry/pvc:            a PVC on the default class everywhere else.
 #   - image-factory/ha:        replicas + anti-affinity for topology: ha.
 #   - image-factory/prometheus: metrics Service and ServiceMonitor.
 #   - image-factory/gateway:   HTTPRoute on the canonical `external` Gateway. One route
 #                              covers both drivers; envoy and cilium each implement it.
 #
-# The object store is derived inline from platform and addons.object_store rather than
-# read from config-object-store's object_store_effective. A config value set by one facet
-# reads back nil in another, and a nil driver compares unequal to 'none', which selects
-# registry/pvc on platforms that have buckets. See windsorcli/cli#3050.
+# Only hetzner and aws reach s3. The registry-s3 Secret carries the Hetzner keys, and on
+# aws an empty key pair leaves the Distribution S3 driver on the instance credential
+# chain. Core's minio addon creates no Tenant and the schema carries no keys for one, so
+# a minio object store stays on a PVC until those credentials exist.
+#
+# Whether an object store exists is derived inline from platform rather than read from
+# config-object-store's object_store. A config value set by one facet reads back nil in
+# another, and a nil driver compares unequal to 'none', which selects registry/pvc on
+# platforms that have buckets. See windsorcli/cli#3050.
 #
 flux:
 
@@ -52,7 +57,6 @@ flux:
     dependsOn:
       - pki-install
       - "${gateway.enabled == true ? 'gateway-install' : ''}"
-      - "${(platform != 'hetzner' && platform != 'aws' && (addons.object_store.enabled ?? false) == true) ? 'object-store-install' : ''}"
     # The chart reads the key from the data key `cache-signing.key`.
     secrets:
       registry-s3:
@@ -66,8 +70,8 @@ flux:
       components:
         - image-factory
         - "${(addons.image_factory.registry.schematic.registry ?? '') == '' ? 'registry' : ''}"
-        - "${(addons.image_factory.registry.schematic.registry ?? '') == '' && (platform == 'hetzner' || platform == 'aws' || (addons.object_store.enabled ?? false) == true) ? 'registry/s3' : ''}"
-        - "${(addons.image_factory.registry.schematic.registry ?? '') == '' && platform != 'hetzner' && platform != 'aws' && (addons.object_store.enabled ?? false) != true ? 'registry/pvc' : ''}"
+        - "${(addons.image_factory.registry.schematic.registry ?? '') == '' && (platform == 'hetzner' || platform == 'aws') ? 'registry/s3' : ''}"
+        - "${(addons.image_factory.registry.schematic.registry ?? '') == '' && platform != 'hetzner' && platform != 'aws' ? 'registry/pvc' : ''}"
         - "${topology == 'ha' ? 'image-factory/ha' : ''}"
         - "${(telemetry.metrics.enabled ?? false) == true ? 'image-factory/prometheus' : ''}"
       substitutions:
@@ -80,10 +84,10 @@ flux:
         registry_endpoint: >-
           ${platform == 'hetzner' ? 'https://' + (hetzner.object_storage.location ?? 'fsn1') + '.your-objectstorage.com'
             : platform == 'aws' ? 'https://s3.' + aws.region + '.amazonaws.com'
-            : (addons.object_store.endpoint ?? '')}
+            : ''}
         registry_storage_class: "${cluster.storage.class ?? 'single'}"
         registry_storage_size: "${addons.image_factory.registry_size ?? '10Gi'}"
-        registry_replicas: "${topology == 'ha' && (platform == 'hetzner' || platform == 'aws' || (addons.object_store.enabled ?? false) == true) ? 2 : 1}"
+        registry_replicas: "${topology == 'ha' && (platform == 'hetzner' || platform == 'aws') ? 2 : 1}"
         external_domain: "${(dns.public_domain ?? '') == '' ? (dns.private_domain ?? dns.domain ?? '') : dns.public_domain}"
         # Explicit override wins; else derive from the domain the route publishes on.
         # docker-desktop reaches the gateway on 8443 rather than 443.

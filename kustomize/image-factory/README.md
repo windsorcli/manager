@@ -67,9 +67,10 @@ the same Gateway either way. The route lives in the resources tier and waits on
 Builds are CPU-bound and each one runs the imager. Three levers, in the order worth
 reaching for them:
 
-1. **Cache.** The default OCI cache means an asset is built once and served thereafter.
-   Switching `cache.driver` to `s3` moves that to a bucket, which pairs with Core's object
-   store addon. Running with no working cache is what makes a factory feel slow.
+1. **Cache.** Assets are cached in the registry, so one is built once and served
+   thereafter. On `hetzner` and `aws` that registry is bucket-backed and the cache
+   survives the pod; elsewhere it lands on a PVC. Running with no working cache is what
+   makes a factory feel slow.
 2. **Concurrency.** `max_concurrency` (default 6) caps simultaneous builds. Raising it
    without node capacity converts one slow build into six slow builds.
 3. **Replicas.** `topology: ha` runs two replicas with anti-affinity. The chart pins the
@@ -92,14 +93,20 @@ reaching for them:
 | `factory_schematic_insecure` | optional | Allow HTTP or invalid TLS to the schematic registry. Defaults to `false`. |
 | `factory_max_concurrency` | optional | Simultaneous asset builds. Defaults to `6`; each build is CPU-bound, so raise it with the node pool rather than ahead of it. |
 | `factory_min_talos_version` | optional | Oldest Talos release assets are generated for. Defaults to `1.2.0`. |
+| `registry_bucket` | `registry/s3` | Bucket backing the in-cluster registry. Named `windsor-<id>-image-factory`, matching the bucket the object-store Terraform module provisions. |
+| `registry_region` | `registry/s3` | Region embedded in the S3 v4 signature. The Hetzner object storage location, or the AWS region. |
+| `registry_endpoint` | `registry/s3` | S3 endpoint the registry writes to, derived from the platform and its location. |
+| `registry_storage_class` | `registry/pvc` | Storage class for the registry volume. Defaults to `cluster.storage.class`, or `single`. |
+| `registry_storage_size` | `registry/pvc` | Size of the registry volume. Defaults to `10Gi`. |
+| `registry_replicas` | optional | Registry replicas. Two on `topology: ha` where a bucket backs it, otherwise one — a PVC cannot be shared across replicas. |
 
 ## Components
 
 | Component | Enable when | Effect |
 |---|---|---|
 | `registry` | no external schematic registry is named | In-cluster OCI registry (`distribution`) holding schematics and cached boot assets. Reached at `registry.image-factory.svc.cluster.local:5000` over plain HTTP; no route, and a NetworkPolicy admits only the factory pod on 5000. |
-| `registry/pvc` | the platform has no object storage | Backs the registry with a PersistentVolumeClaim on the default storage class. Without it the registry is an emptyDir, and a restart loses every schematic id already handed out. |
-| `registry/s3` | the platform has object storage | Backs the registry with a bucket from the object store instead of a volume. |
+| `registry/pvc` | the platform is neither `hetzner` nor `aws` | Backs the registry with a PersistentVolumeClaim on the default storage class. Without it the registry is an emptyDir, and a restart loses every schematic id already handed out. |
+| `registry/s3` | `platform` is `hetzner` or `aws` | Backs the registry with a bucket from the platform's object store instead of a volume. Limited to the platforms the registry holds credentials for: Hetzner keys come from `hetzner.object_storage`, and on AWS an empty key pair leaves the S3 driver on the instance credential chain. A minio object store stays on a PVC until credentials for one exist. |
 | `image-factory` | `addons.image_factory.enabled == true` | Helm release of the Sidero Labs `image-factory` chart in `image-factory`, from `oci://ghcr.io/siderolabs/charts`. Serves the UI, API, and registry frontends on :8080. Runs as uid 1000, non-root, baseline PSA-compatible. The chart supports only the Recreate deployment strategy. |
 | `image-factory/ha` | `topology == 'ha'` | Two replicas with pod anti-affinity across nodes. Redundancy against node loss only — the Recreate strategy means rollouts still have a gap. Safe because builds are stateless: schematics live in the registry, cached assets in the cache backend. |
 | `image-factory/prometheus` | `telemetry.metrics.enabled == true` | Metrics Service on :2122 plus a ServiceMonitor. Both are needed — the chart leaves the metrics Service off by default, so a ServiceMonitor alone would have nothing to scrape. |
@@ -111,7 +118,6 @@ reaching for them:
 |---|---|---|
 | `pki` | always | The factory is served over TLS, and the certificate is issued by the cluster issuer cert-manager installs. |
 | `gateway` | `gateway.enabled == true` | The route CRDs have to exist before the chart renders an Ingress or HTTPRoute. |
-| `object-store` | `addons.image_factory.cache.driver == 's3'` | The S3 cache backend needs a bucket. Core's object store addon provides the in-cluster MinIO that backs it. |
 
 <!-- END_KUSTOMIZE_DOCS -->
 
@@ -124,35 +130,34 @@ schematics:
 addons:
   image_factory:
     enabled: true
-    host: factory.example.com
+    external_url: https://factory.example.com
     cache_signing_key: ${secret("Developer", "image-factory", "cache_signing_key")}
     registry:
       schematic:
         registry: registry.example.com
 ```
 
-Backed by Core's object store, with metrics and redundancy:
+Bucket-backed, with metrics and redundancy. On `hetzner` and `aws` the registry moves to
+the platform's object store on its own — there is no cache driver to select, and the
+bucket is provisioned by the object-store module:
 
 ```yaml
+platform: aws
 topology: ha
 telemetry:
   metrics:
     enabled: true
+aws:
+  region: us-west-2
 addons:
-  object_store:
-    enabled: true
   image_factory:
     enabled: true
-    host: factory.example.com
+    external_url: https://factory.example.com
     cache_signing_key: ${secret("Developer", "image-factory", "cache_signing_key")}
-    registry:
-      schematic:
-        registry: registry.example.com
-    cache:
-      driver: s3
-      endpoint: https://minio.system-object-store.svc:9000
-      bucket: image-factory
 ```
+
+Leaving `registry.schematic` unset is what turns on the in-cluster registry; naming an
+external registry there disables it and the platform's object store goes unused.
 
 ## Not covered yet
 

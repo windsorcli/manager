@@ -122,8 +122,9 @@ cases:
               registry_endpoint: ""
               registry_replicas: "1"
 
-  # Core's minio operator: the registry moves to bucket storage and waits on the addon.
-  - name: backs the in-cluster registry with s3 when the core object store is enabled
+  # Core's minio operator creates no Tenant and the schema carries no keys for one, so the
+  # registry stays on a PVC rather than pointing at a bucket it cannot authenticate to.
+  - name: keeps the registry on a pvc when the object store is minio
     values:
       id: tst1
       platform: metal
@@ -139,17 +140,18 @@ cases:
     expect:
       flux:
         - name: image-factory
-          dependsOn:
-            - pki-install
-            - object-store-install
           install:
             components:
               - image-factory
               - registry
-              - registry/s3
+              - registry/pvc
             substitutions:
-              registry_endpoint: https://minio.system-object-store.svc:9000
-              registry_bucket: windsor-tst1-image-factory
+              registry_endpoint: ""
+
+  # There is no hetzner case here. core:latest ships no platform-hetzner.yaml, so
+  # `platform: hetzner` fails to compose ("cni depends on non-existent component
+  # cluster") before any of this facet is reached. Add one once Core releases it; the
+  # aws case below covers the same s3 selection and substitution logic.
 
   # A platform with its own object storage needs no addon to reach s3, and the bucket
   # name has to match the one config-object-store provisions.
