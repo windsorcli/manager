@@ -23,12 +23,19 @@ tasks:
       - cmd: source .venv/bin/activate && checkov -d {{.CLI_ARGS | default "terraform/"}} 2>/dev/null
 
   test:
-    desc: Run all tests (Terraform, Blueprint, and Prometheus rules)
+    desc: Run all tests (Terraform, Blueprint, Kustomize builds, and Prometheus rules)
     silent: true
     cmds:
       - task: test:terraform
       - task: test:blueprint
+      - task: test:kustomize
       - task: test:prometheus-rules
+
+  test:kustomize:
+    desc: Build every kustomize component against its tier to catch patches with no target
+    silent: true
+    cmds:
+      - scripts/kustomize-build-check.sh {{.CLI_ARGS}}
 
   test:prometheus-rules:
     desc: Unit-test PrometheusRule alerting rules via promtool

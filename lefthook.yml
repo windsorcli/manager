@@ -6,9 +6,12 @@ pre-commit:
       run: terraform fmt {staged_files}
       stage_fixed: true
 
+# The pre-push suite was globbed to *.tf/*.tfvars, so facet and test edits — every
+# YAML-only change — pushed with nothing run. CI runs the same `task test`; this is the
+# fast local copy of it.
 pre-push:
   parallel: true
   commands:
-    terraform-test:
-      glob: "*.{tf,tfvars}"
+    test:
+      glob: "*.{tf,tfvars,yaml,yml,sh}"
       run: task test
