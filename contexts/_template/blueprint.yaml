@@ -7,5 +7,7 @@ sources:
   - name: core
     url: oci://ghcr.io/windsorcli/core:latest
     install: true
+  - name: template
+    install: true
 terraform: []
 kustomize: []

@@ -33,10 +33,39 @@ type: object
 #     in-cluster secrets backend; a management-side store needs its own key rather
 #     than an extra property there.
 
-properties: {}
+properties:
 
-# Core closes its own root the same way. Repeating it here keeps the root closed if
-# this fragment is ever validated without Core's, and costs nothing when it isn't:
-# the merge takes non-properties keys from whichever fragment lands last, and both
-# sides carry the same value.
-additionalProperties: false
+  # Core owns `addons`; its `additionalProperties: false` is not restated here.
+  addons:
+    type: object
+    properties:
+
+      # Sibling of Core's enabled/driver on the same block.
+      object_store:
+        type: object
+        properties:
+          endpoint:
+            type: string
+            description: S3 endpoint of the MinIO Tenant serving buckets. Core's addon installs the operator but creates no Tenant, so on platforms with no managed object storage this has to be given explicitly.
+
+  # Sibling of Core's location, network_zone, token, and dns_parent_zone.
+  hetzner:
+    type: object
+    properties:
+      object_storage:
+        type: object
+        properties:
+          access_key:
+            type: string
+            sensitive: true
+            description: S3 access key for the Hetzner project. Generated in the Hetzner console; there is no API to create one. Set via a secret() reference.
+          secret_key:
+            type: string
+            sensitive: true
+            description: S3 secret key paired with access_key. Set via a secret() reference.
+        additionalProperties: false
+        description: Hetzner Object Storage credentials
+
+# Root stays open. `windsor test` loads this file alone without merging the schemas its
+# sources contribute, so `additionalProperties: false` here rejects every Core key.
+# Core closes its own root, and that survives the merge in a normal composition.
