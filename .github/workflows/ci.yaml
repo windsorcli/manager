@@ -1,9 +1,15 @@
 # =============================================================================
 # CI workflow
 # =============================================================================
-# Runs on push-to-main, tagged releases, and PRs against main. One job today:
+# Runs on push-to-main, tagged releases, and PRs against main.
 #   code-checks — yamllint, shellcheck, terraform fmt, checkov
-# Tests and integration jobs are added as blueprint content lands.
+#   tests       — terraform module tests, blueprint facet tests, prometheus rules
+#   integration — brings a local cluster up on the composed blueprint and tears it down
+#
+# The Windsor CLI is installed from windsorcli/action at ref main rather than a release.
+# The blueprint lists sources and owns its facets, a shape that silently loaded no local
+# facets before windsorcli/cli#3048, and that fix is not in a release yet. Pin this to a
+# tag once one ships that carries it.
 name: CI
 
 on:
@@ -19,6 +25,16 @@ on:
 permissions:
   contents: read
   security-events: write
+
+env:
+  WINDSOR_PROJECT_ROOT: ${{ github.workspace }}
+  DOCKER_HOST: unix:///var/run/docker.sock
+  # renovate: datasource=github-releases depName=yq package=mikefarah/yq
+  YQ_VERSION: v4.53.3
+  # renovate: datasource=github-releases depName=prometheus/prometheus package=prometheus/prometheus
+  PROMETHEUS_VERSION: v3.13.1
+  # renovate: datasource=github-releases depName=flux package=fluxcd/flux2
+  FLUX_VERSION: v2.9.2
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
@@ -76,3 +92,181 @@ jobs:
         uses: github/codeql-action/upload-sarif@7188fc363630916deb702c7fdcf4e481b751f97a # v4.37.1
         with:
           sarif_file: results.sarif
+
+  # ===========================================================================
+  # Tests
+  # ===========================================================================
+  # Terraform module tests, blueprint facet tests, and PrometheusRule unit tests.
+  # None of these ran in CI before: the lefthook pre-push hook is globbed to
+  # *.tf/*.tfvars, so a facet or test change — every YAML-only change — pushed with
+  # nothing run at all.
+  tests:
+    name: Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          # renovate: datasource=github-releases depName=terraform package=hashicorp/terraform
+          terraform_version: 1.12.2
+
+      - name: Install Windsor CLI
+        uses: windsorcli/action@main
+        with:
+          ref: main
+          context: local
+
+      - name: Install Task
+        uses: go-task/setup-task@01a4adf9db2d14c1de7a560f09170b6e0df736aa # v2.1.0
+        with:
+          version: 3.x
+
+      # yq renders each PrometheusRule's .spec for promtool; local devs get both via
+      # aqua, CI installs the same pinned versions directly.
+      - name: Install yq
+        run: |
+          cd "$(mktemp -d)" &&
+          curl -fsSLO "https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/yq_linux_amd64" &&
+          sudo install -m 0755 -o root -g root yq_linux_amd64 /usr/local/bin/yq &&
+          cd - &&
+          rm -rf "$OLDPWD" &&
+          yq --version
+
+      - name: Install promtool
+        run: |
+          cd "$(mktemp -d)" &&
+          curl -fsSLO "https://github.com/prometheus/prometheus/releases/download/${PROMETHEUS_VERSION}/prometheus-${PROMETHEUS_VERSION#v}.linux-amd64.tar.gz" &&
+          tar xzf "prometheus-${PROMETHEUS_VERSION#v}.linux-amd64.tar.gz" &&
+          sudo install -m 0755 -o root -g root "prometheus-${PROMETHEUS_VERSION#v}.linux-amd64/promtool" /usr/local/bin/promtool &&
+          cd - &&
+          rm -rf "$OLDPWD" &&
+          promtool --version
+
+      # task test builds every kustomize component; facet tests assert composition and
+      # never render a manifest, so a patch with no target passes them untouched.
+      - name: Install kustomize
+        uses: imranismail/setup-kustomize@2ba527d4d055ab63514ba50a99456fc35684947f # v2.1.0
+        with:
+          # renovate: datasource=github-releases depName=kustomize package=kubernetes-sigs/kustomize
+          kustomize-version: 5.8.1
+
+      - name: Run Tests
+        run: task test
+
+  # ===========================================================================
+  # Integration
+  # ===========================================================================
+  # Brings the composed blueprint up on a local Talos cluster in Docker, with the image
+  # factory enabled, then tears it down. Manager layers on core:latest, so this is also
+  # the only check that the published Core artifact and these facets still compose.
+  integration:
+    name: Integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Load br_netfilter kernel module
+        run: |
+          sudo modprobe br_netfilter
+          echo "1" | sudo tee /proc/sys/net/bridge/bridge-nf-call-iptables
+          echo "1" | sudo tee /proc/sys/net/bridge/bridge-nf-call-ip6tables
+
+      # Reclaim ~30 GB of pre-installed toolchains this repo never uses. Without it the
+      # kubelet in the Talos VM hits its ephemeral-storage eviction threshold pulling
+      # images and evicts the Flux controllers.
+      - name: Free disk space
+        run: |
+          df -h /
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
+          df -h /
+
+      - name: Configure Docker for increased storage
+        run: |
+          sudo mkdir -p /mnt/docker-data /etc/docker
+          echo '{
+            "data-root": "/mnt/docker-data",
+            "log-driver": "json-file",
+            "log-opts": {
+              "max-size": "10m",
+              "max-file": "3"
+            }
+          }' | sudo tee /etc/docker/daemon.json
+          sudo systemctl restart docker || sudo service docker restart || true
+          timeout 30 bash -c 'until docker info > /dev/null 2>&1; do sleep 1; done' || true
+          docker info | grep "Docker Root Dir" || true
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          # renovate: datasource=github-releases depName=terraform package=hashicorp/terraform
+          terraform_version: 1.12.2
+
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@829323503d1be3d00ca8346e5391ca0b07a9ab0d # v5.1.0
+        with:
+          # renovate: datasource=github-releases depName=kubectl package=kubernetes/kubectl
+          version: v1.34.1
+
+      - name: Install Flux CLI
+        run: |
+          cd "$(mktemp -d)" &&
+          curl -fsSLO "https://github.com/fluxcd/flux2/releases/download/${FLUX_VERSION}/flux_${FLUX_VERSION#v}_linux_amd64.tar.gz" &&
+          tar xzf "flux_${FLUX_VERSION#v}_linux_amd64.tar.gz" &&
+          sudo install -m 0755 -o root -g root flux /usr/local/bin/ &&
+          cd - &&
+          rm -rf "$OLDPWD" &&
+          flux --version
+
+      - name: Install Windsor CLI
+        uses: windsorcli/action@main
+        with:
+          ref: main
+          context: local
+
+      # The image factory is off by default, so without --set this would bring up a bare
+      # Core cluster and assert nothing about what this repo adds. dns.domain matches what
+      # the add-on's route is published under.
+      - name: Windsor Init
+        run: |
+          windsor init local --reset \
+            --set dns.domain=test \
+            --set addons.image_factory.enabled=true
+
+      - name: Show blueprint
+        run: windsor show blueprint
+
+      - name: Windsor Up
+        id: windsor_up
+        timeout-minutes: 25
+        run: windsor up --verbose --wait
+
+      # `windsor up --wait` returns once kustomizations reconcile; this pins down that the
+      # factory in particular is serving, rather than merely applied.
+      - name: Verify the image factory
+        run: |
+          kubectl -n image-factory rollout status deploy/image-factory --timeout=5m
+          kubectl -n image-factory rollout status deploy/registry --timeout=5m
+          kubectl -n image-factory get pods -o wide
+          kubectl get kustomizations -A
+
+      - name: Diagnostics on failure
+        if: failure()
+        run: |
+          kubectl get kustomizations -A || true
+          kubectl get helmreleases -A || true
+          kubectl -n image-factory get events --sort-by=.lastTimestamp || true
+          kubectl -n image-factory describe pods || true
+          kubectl -n image-factory logs -l app.kubernetes.io/name=image-factory --tail=200 || true
+          kubectl -n image-factory logs -l app.kubernetes.io/name=registry --tail=200 || true
+          flux get all -A || true
+
+      - name: Windsor Down
+        if: always()
+        run: |
+          windsor destroy --confirm local || true
+          windsor down || true
