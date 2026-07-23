@@ -26,11 +26,15 @@
     },
     {
       "description": "Keep Terraform on the 1.12 line for OpenTofu compatibility (matches required_version \"~> 1.12\"); allow 1.12.x patches, block 1.13+",
-      "matchPackageNames": ["hashicorp/terraform"],
+      "matchPackageNames": [
+        "hashicorp/terraform"
+      ],
       "allowedVersions": "<1.13"
     },
     {
-      "matchDatasources": ["terraform-provider"],
+      "matchDatasources": [
+        "terraform-provider"
+      ],
       "automerge": true,
       "automergeType": "pr",
       "automergeStrategy": "squash",
@@ -84,37 +88,62 @@
       ]
     },
     {
-      "matchPackageNames": ["windsorcli/k8s-versions"],
-      "matchDepNames": ["aks-kubernetes"],
+      "matchPackageNames": [
+        "windsorcli/k8s-versions"
+      ],
+      "matchDepNames": [
+        "aks-kubernetes"
+      ],
       "extractVersion": "^aks-kubernetes-(?<version>\\d+\\.\\d+\\.\\d+)$",
       "versioning": "semver"
     },
     {
-      "matchPackageNames": ["windsorcli/k8s-versions"],
-      "matchDepNames": ["eks-kubernetes"],
+      "matchPackageNames": [
+        "windsorcli/k8s-versions"
+      ],
+      "matchDepNames": [
+        "eks-kubernetes"
+      ],
       "extractVersion": "^eks-kubernetes-(?<version>\\d+\\.\\d+\\.\\d+)$",
       "versioning": "semver"
     },
     {
       "description": "Pin Docker image digests in Helm release values",
-      "matchDatasources": ["docker"],
+      "matchDatasources": [
+        "docker"
+      ],
       "pinDigests": true,
       "enabled": true,
       "automerge": true,
       "automergeType": "pr",
       "automergeStrategy": "squash",
-      "labels": ["dependencies"]
+      "labels": [
+        "dependencies"
+      ]
     },
     {
       "description": "Pin ghcr.io/distribution/distribution at 3.0.0 - bug in 3.1.0",
-      "matchPackageNames": ["ghcr.io/distribution/distribution"],
+      "matchPackageNames": [
+        "ghcr.io/distribution/distribution"
+      ],
       "enabled": false
     },
     {
       "description": "Track windsorcli/action@main for edge validation; don't pin or update",
-      "matchManagers": ["github-actions"],
-      "matchPackageNames": ["windsorcli/action"],
+      "matchManagers": [
+        "github-actions"
+      ],
+      "matchPackageNames": [
+        "windsorcli/action"
+      ],
       "enabled": false
+    },
+    {
+      "description": "kustomize tags releases as kustomize/vX.Y.Z; strip the prefix so versions compare",
+      "matchPackageNames": [
+        "kubernetes-sigs/kustomize"
+      ],
+      "extractVersion": "^kustomize/(?<version>.+)$"
     }
   ],
   "customManagers": [

@@ -35,6 +35,8 @@ env:
   PROMETHEUS_VERSION: v3.13.1
   # renovate: datasource=github-releases depName=flux package=fluxcd/flux2
   FLUX_VERSION: v2.9.2
+  # renovate: datasource=github-releases depName=kustomize package=kubernetes-sigs/kustomize
+  KUSTOMIZE_VERSION: v5.8.1
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
@@ -145,13 +147,19 @@ jobs:
           rm -rf "$OLDPWD" &&
           promtool --version
 
-      # task test builds every kustomize component; facet tests assert composition and
-      # never render a manifest, so a patch with no target passes them untouched.
+      # task test builds every kustomize component: facet tests assert composition and
+      # never render a manifest, so a patch with no target passes them untouched. The
+      # release tag is kustomize/vX.Y.Z, hence the encoded slash; renovate strips the
+      # prefix via extractVersion.
       - name: Install kustomize
-        uses: imranismail/setup-kustomize@2ba527d4d055ab63514ba50a99456fc35684947f # v2.1.0
-        with:
-          # renovate: datasource=github-releases depName=kustomize package=kubernetes-sigs/kustomize
-          kustomize-version: 5.8.1
+        run: |
+          cd "$(mktemp -d)" &&
+          curl -fsSLO "https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2F${KUSTOMIZE_VERSION}/kustomize_${KUSTOMIZE_VERSION}_linux_amd64.tar.gz" &&
+          tar xzf "kustomize_${KUSTOMIZE_VERSION}_linux_amd64.tar.gz" &&
+          sudo install -m 0755 -o root -g root kustomize /usr/local/bin/ &&
+          cd - &&
+          rm -rf "$OLDPWD" &&
+          kustomize version
 
       - name: Run Tests
         run: task test
