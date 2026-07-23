@@ -1,0 +1,115 @@
+kind: Facet
+apiVersion: blueprints.windsorcli.dev/v1alpha1
+metadata:
+  name: image-factory
+  description: Self-hosted Talos image factory for schematic and boot asset generation
+
+# Composes after every Core layer. See docs/adr/0001-layering-on-core.md.
+ordinal: 500
+
+when: addons.image_factory.enabled == true
+
+# =============================================================================
+# Requires
+# =============================================================================
+requires:
+
+# =============================================================================
+# Terraform — cache signing key
+# =============================================================================
+# Generated once and held in state. Rotating it invalidates every asset already
+# signed, so the module is only applied when the operator supplies no key.
+terraform:
+
+  - name: image-factory-signing-key
+    path: keys/signing
+    when: (addons.image_factory.cache_signing_key ?? '') == ''
+
+# =============================================================================
+# Flux system — image factory
+# =============================================================================
+# pki-install issues the TLS certificate, gateway-install supplies the route CRDs, and
+# object-store backs the S3 cache.
+#
+# Conditional components:
+#   - registry:                in-cluster OCI registry holding schematics and cached
+#                              assets, unless an external registry is named.
+#   - registry/s3:             bucket-backed registry storage where object storage exists.
+#   - registry/pvc:            a PVC on the default class where it does not.
+#   - image-factory/ha:        replicas + anti-affinity for topology: ha.
+#   - image-factory/prometheus: metrics Service and ServiceMonitor.
+#   - image-factory/gateway:   HTTPRoute on the canonical `external` Gateway. One route
+#                              covers both drivers; envoy and cilium each implement it.
+#
+# The object store is derived inline from platform and addons.object_store rather than
+# read from config-object-store's object_store_effective. A config value set by one facet
+# reads back nil in another, and a nil driver compares unequal to 'none', which selects
+# registry/pvc on platforms that have buckets. See windsorcli/cli#3050.
+#
+flux:
+
+  - name: image-factory
+    dependsOn:
+      - pki-install
+      - "${gateway.enabled == true ? 'gateway-install' : ''}"
+      - "${(platform != 'hetzner' && platform != 'aws' && (addons.object_store.enabled ?? false) == true) ? 'object-store-install' : ''}"
+    # The chart reads the key from the data key `cache-signing.key`.
+    secrets:
+      registry-s3:
+        data:
+          access_key: ${hetzner.object_storage.access_key ?? ''}
+          secret_key: ${hetzner.object_storage.secret_key ?? ''}
+      image-factory-cache-signing-key:
+        data:
+          cache-signing.key: ${addons.image_factory.cache_signing_key ?? terraform_output("image-factory-signing-key", "private_key_pem")}
+    install:
+      components:
+        - image-factory
+        - "${(addons.image_factory.registry.schematic.registry ?? '') == '' ? 'registry' : ''}"
+        - "${(addons.image_factory.registry.schematic.registry ?? '') == '' && (platform == 'hetzner' || platform == 'aws' || (addons.object_store.enabled ?? false) == true) ? 'registry/s3' : ''}"
+        - "${(addons.image_factory.registry.schematic.registry ?? '') == '' && platform != 'hetzner' && platform != 'aws' && (addons.object_store.enabled ?? false) != true ? 'registry/pvc' : ''}"
+        - "${topology == 'ha' ? 'image-factory/ha' : ''}"
+        - "${(telemetry.metrics.enabled ?? false) == true ? 'image-factory/prometheus' : ''}"
+      substitutions:
+        # Names the bucket config-object-store provisions, so the two stay in step.
+        registry_bucket: "windsor-${id}-image-factory"
+        registry_region: >-
+          ${platform == 'hetzner' ? (hetzner.object_storage.location ?? 'fsn1')
+            : platform == 'aws' ? aws.region
+            : ''}
+        registry_endpoint: >-
+          ${platform == 'hetzner' ? 'https://' + (hetzner.object_storage.location ?? 'fsn1') + '.your-objectstorage.com'
+            : platform == 'aws' ? 'https://s3.' + aws.region + '.amazonaws.com'
+            : (addons.object_store.endpoint ?? '')}
+        registry_storage_class: "${cluster.storage.class ?? 'single'}"
+        registry_storage_size: "${addons.image_factory.registry_size ?? '10Gi'}"
+        registry_replicas: "${topology == 'ha' && (platform == 'hetzner' || platform == 'aws' || (addons.object_store.enabled ?? false) == true) ? 2 : 1}"
+        external_domain: "${(dns.public_domain ?? '') == '' ? (dns.private_domain ?? dns.domain ?? '') : dns.public_domain}"
+        # Explicit override wins; else derive from the domain the route publishes on.
+        # docker-desktop reaches the gateway on 8443 rather than 443.
+        factory_external_url: >-
+          ${addons.image_factory.external_url
+            ?? ('https://factory.' + ((dns.public_domain ?? '') == ''
+                  ? (dns.private_domain ?? dns.domain ?? '')
+                  : dns.public_domain)
+                + (workstation.runtime == 'docker-desktop' ? ':8443' : ''))}
+        factory_schematic_registry: "${addons.image_factory.registry.schematic.registry ?? 'registry.image-factory.svc.cluster.local:5000'}"
+        factory_schematic_namespace: "${addons.image_factory.registry.schematic.namespace ?? 'siderolabs/image-factory'}"
+        factory_schematic_repository: "${addons.image_factory.registry.schematic.repository ?? 'schematics'}"
+        factory_schematic_insecure: "${(addons.image_factory.registry.schematic.registry ?? '') == '' ? true : (addons.image_factory.registry.schematic.insecure ?? false)}"
+        factory_max_concurrency: "${addons.image_factory.max_concurrency ?? 6}"
+        factory_min_talos_version: "${addons.image_factory.min_talos_version ?? '1.2.0'}"
+        factory_cache_registry: "${addons.image_factory.registry.schematic.registry ?? 'registry.image-factory.svc.cluster.local:5000'}"
+        factory_cache_insecure: "${(addons.image_factory.registry.schematic.registry ?? '') == '' ? true : (addons.image_factory.registry.schematic.insecure ?? false)}"
+      timeout: 10m
+      interval: 5m
+    resources:
+      - when: (gateway.enabled ?? ingress.enabled ?? true) == true
+        dependsOn:
+          - gateway-resources
+        components:
+          - image-factory/gateway
+        substitutions:
+          external_domain: "${(dns.public_domain ?? '') == '' ? (dns.private_domain ?? dns.domain ?? '') : dns.public_domain}"
+        timeout: 10m
+        interval: 5m

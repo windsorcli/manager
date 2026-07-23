@@ -48,6 +48,60 @@ properties:
             type: string
             description: S3 endpoint of the MinIO Tenant serving buckets. Core's addon installs the operator but creates no Tenant, so on platforms with no managed object storage this has to be given explicitly.
 
+      image_factory:
+        type: object
+        properties:
+          enabled:
+            type: boolean
+            default: false
+            description: Enable the self-hosted Talos image factory.
+          external_url:
+            type: string
+            description: Base URL the factory publishes in download links and installer references. Derived from the domain when unset; set it where the gateway is reached on a non-standard port or through another name.
+          registry_size:
+            type: string
+            default: 10Gi
+            description: Size of the volume backing the in-cluster registry, where no object storage exists. Holds schematics and cached boot assets.
+          max_concurrency:
+            type: integer
+            minimum: 1
+            default: 6
+            description: Simultaneous asset builds. Each build is CPU-heavy; raise it with the node pool, not ahead of it.
+          min_talos_version:
+            type: string
+            default: "1.2.0"
+            description: Oldest Talos release the factory will generate assets for.
+          cache_signing_key:
+            type: string
+            sensitive: true
+            description: ECDSA private key used to sign cached boot assets so nodes can verify what the factory serves. Generate with `openssl ecparam -name prime256v1 -genkey -noout`. Set via a secret() reference.
+          registry:
+            type: object
+            properties:
+              schematic:
+                type: object
+                properties:
+                  registry:
+                    type: string
+                    description: OCI registry the factory writes generated schematics to. It needs push access; this is not a mirror.
+                  namespace:
+                    type: string
+                    default: siderolabs/image-factory
+                    description: Repository path prefix for schematics.
+                  repository:
+                    type: string
+                    default: schematics
+                    description: Repository name for schematics.
+                  insecure:
+                    type: boolean
+                    default: false
+                    description: Allow HTTP or invalid TLS to the schematic registry.
+                additionalProperties: false
+            additionalProperties: false
+            description: Registries the factory reads from and writes to.
+        additionalProperties: false
+        description: Self-hosted Talos image factory
+
   # Sibling of Core's location, network_zone, token, and dns_parent_zone.
   hetzner:
     type: object
@@ -55,6 +109,14 @@ properties:
       object_storage:
         type: object
         properties:
+          location:
+            type: string
+            enum:
+              - fsn1
+              - nbg1
+              - hel1
+            default: fsn1
+            description: Location holding the buckets. Object Storage runs in fsn1, nbg1, and hel1 only, so a cluster in ash, hil, or sin reaches its buckets across regions.
           access_key:
             type: string
             sensitive: true

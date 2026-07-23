@@ -1,0 +1,21 @@
+# The registry serves only the factory: schematics on push, cached assets on read. It has
+# no route and no authentication, so this is what keeps the rest of the cluster off it.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: registry
+  namespace: image-factory
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: registry
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: image-factory
+      ports:
+        - protocol: TCP
+          port: 5000

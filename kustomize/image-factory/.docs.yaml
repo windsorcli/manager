@@ -1,0 +1,61 @@
+# Descriptor consumed by scripts/kustomize-docs.sh to populate the
+# BEGIN_KUSTOMIZE_DOCS / END_KUSTOMIZE_DOCS region of README.md.
+# Edit this file (not the README tables) when substitutions, components,
+# or dependencies change.
+
+substitutions:
+  external_domain:
+    required_when: "always"
+    description: "Domain the factory is served under; the hostname is `factory.<external_domain>`. Public domain when set, otherwise the private domain or the cluster domain."
+  factory_schematic_registry:
+    required_when: "always"
+    description: "OCI registry the factory pushes generated schematics to. Needs push access; the chart's `registry.example.com` is a placeholder, not a working default."
+  factory_schematic_namespace:
+    required_when: "optional"
+    description: "Repository path prefix for schematics. Defaults to `siderolabs/image-factory`."
+  factory_schematic_repository:
+    required_when: "optional"
+    description: "Repository name for schematics. Defaults to `schematics`."
+  factory_schematic_insecure:
+    required_when: "optional"
+    description: "Allow HTTP or invalid TLS to the schematic registry. Defaults to `false`."
+  factory_max_concurrency:
+    required_when: "optional"
+    description: "Simultaneous asset builds. Defaults to `6`; each build is CPU-bound, so raise it with the node pool rather than ahead of it."
+  factory_min_talos_version:
+    required_when: "optional"
+    description: "Oldest Talos release assets are generated for. Defaults to `1.2.0`."
+
+components:
+  registry:
+    enable_when: "no external schematic registry is named"
+    description: "In-cluster OCI registry (`distribution`) holding schematics and cached boot assets. Reached at `registry.image-factory.svc.cluster.local:5000` over plain HTTP; no route, and a NetworkPolicy admits only the factory pod on 5000."
+  registry/pvc:
+    enable_when: "the platform has no object storage"
+    description: "Backs the registry with a PersistentVolumeClaim on the default storage class. Without it the registry is an emptyDir, and a restart loses every schematic id already handed out."
+  registry/s3:
+    enable_when: "the platform has object storage"
+    description: "Backs the registry with a bucket from the object store instead of a volume."
+
+  image-factory:
+    enable_when: "`addons.image_factory.enabled == true`"
+    description: "Helm release of the Sidero Labs `image-factory` chart in `image-factory`, from `oci://ghcr.io/siderolabs/charts`. Serves the UI, API, and registry frontends on :8080. Runs as uid 1000, non-root, baseline PSA-compatible. The chart supports only the Recreate deployment strategy."
+  image-factory/ha:
+    enable_when: "`topology == 'ha'`"
+    description: "Two replicas with pod anti-affinity across nodes. Redundancy against node loss only — the Recreate strategy means rollouts still have a gap. Safe because builds are stateless: schematics live in the registry, cached assets in the cache backend."
+  image-factory/prometheus:
+    enable_when: "`telemetry.metrics.enabled == true`"
+    description: "Metrics Service on :2122 plus a ServiceMonitor. Both are needed — the chart leaves the metrics Service off by default, so a ServiceMonitor alone would have nothing to scrape."
+  image-factory/gateway:
+    enable_when: "gateway is enabled"
+    description: "HTTPRoute on Core's canonical `external` Gateway, attached to both the web-http and web-https listeners. One route serves both gateway drivers, since envoy and cilium each implement Gateway API. Lives in the resources tier and depends on `gateway-resources`."
+dependencies:
+  pki:
+    required_when: "always"
+    reason: "The factory is served over TLS, and the certificate is issued by the cluster issuer cert-manager installs."
+  gateway:
+    required_when: "`gateway.enabled == true`"
+    reason: "The route CRDs have to exist before the chart renders an Ingress or HTTPRoute."
+  object-store:
+    required_when: "`addons.image_factory.cache.driver == 's3'`"
+    reason: "The S3 cache backend needs a bucket. Core's object store addon provides the in-cluster MinIO that backs it."

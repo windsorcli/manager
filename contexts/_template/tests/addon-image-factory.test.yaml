@@ -1,0 +1,254 @@
+# addon-image-factory.yaml facet tests
+# Covers each conditional component, the storage the in-cluster registry lands on for
+# every object store the platform resolves to, and exclusion when the addon is off.
+#
+# The registry components only appear when no external registry is named, so the cases
+# that exercise them leave addons.image_factory.registry unset.
+
+x-defaults:
+  network: &default-network
+    cidr_block: 10.5.0.0/16
+    loadbalancer_driver: kube-vip
+    loadbalancer_mode: arp
+    loadbalancer_ips:
+      start: "10.5.1.10"
+      end: "10.5.1.100"
+
+  cluster: &default-cluster
+    driver: talos
+    controlplanes:
+      nodes:
+        controlplane-1:
+          endpoint: 10.5.0.10:50000
+          node: 10.5.0.10
+          hostname: controlplane-1
+    workers:
+      volumes:
+        - /var/mnt/local
+
+  factory: &default-factory
+    enabled: true
+    registry:
+      schematic:
+        registry: registry.example.com
+
+cases:
+  # Baseline: OCI cache, envoy gateway, no metrics, no HA.
+  - name: installs the factory with the gateway route on envoy
+    values:
+      platform: metal
+      network: *default-network
+      cluster: *default-cluster
+      gateway:
+        enabled: true
+        driver: envoy
+      addons:
+        image_factory: *default-factory
+    expect:
+      terraform:
+        - name: image-factory-signing-key
+          path: keys/signing
+      flux:
+        - name: image-factory
+          dependsOn:
+            - pki-install
+            - gateway-install
+          install:
+            components:
+              - image-factory
+            timeout: 10m
+            interval: 5m
+          resources:
+            - components:
+                - image-factory/gateway
+              dependsOn:
+                - gateway-resources
+
+  # Scale-out: replicas and metrics. The cache stays on the in-cluster registry until the
+  # factory's bucket credentials are wired.
+  - name: adds ha and metrics
+    values:
+      platform: metal
+      topology: ha
+      network: *default-network
+      cluster: *default-cluster
+      gateway:
+        enabled: true
+        driver: envoy
+      telemetry:
+        metrics:
+          enabled: true
+      addons:
+        object_store:
+          enabled: true
+          driver: minio
+          endpoint: https://minio.system-object-store.svc:9000
+        image_factory:
+          enabled: true
+          registry:
+            schematic:
+              registry: registry.example.com
+    expect:
+      flux:
+        - name: image-factory
+          dependsOn:
+            - pki-install
+            - gateway-install
+          install:
+            components:
+              - image-factory
+              - image-factory/ha
+              - image-factory/prometheus
+
+  # In-cluster registry with nothing to back it: a PVC on the default storage class.
+  - name: backs the in-cluster registry with a pvc when no object store resolves
+    values:
+      id: tst1
+      platform: metal
+      network: *default-network
+      cluster: *default-cluster
+      addons:
+        image_factory:
+          enabled: true
+    expect:
+      flux:
+        - name: image-factory
+          install:
+            components:
+              - image-factory
+              - registry
+              - registry/pvc
+            substitutions:
+              registry_endpoint: ""
+              registry_replicas: "1"
+
+  # Core's minio operator: the registry moves to bucket storage and waits on the addon.
+  - name: backs the in-cluster registry with s3 when the core object store is enabled
+    values:
+      id: tst1
+      platform: metal
+      network: *default-network
+      cluster: *default-cluster
+      addons:
+        object_store:
+          enabled: true
+          driver: minio
+          endpoint: https://minio.system-object-store.svc:9000
+        image_factory:
+          enabled: true
+    expect:
+      flux:
+        - name: image-factory
+          dependsOn:
+            - pki-install
+            - object-store-install
+          install:
+            components:
+              - image-factory
+              - registry
+              - registry/s3
+            substitutions:
+              registry_endpoint: https://minio.system-object-store.svc:9000
+              registry_bucket: windsor-tst1-image-factory
+
+  # A platform with its own object storage needs no addon to reach s3, and the bucket
+  # name has to match the one config-object-store provisions.
+  - name: derives the bucket, region, and endpoint from the platform on aws
+    values:
+      id: tst1
+      platform: aws
+      network: *default-network
+      cluster: *default-cluster
+      aws:
+        region: us-west-2
+      addons:
+        image_factory:
+          enabled: true
+    expect:
+      terraform:
+        - name: object-store
+          path: object-store/aws
+          inputs:
+            buckets:
+              - windsor-tst1-image-factory
+      flux:
+        - name: image-factory
+          install:
+            components:
+              - image-factory
+              - registry
+              - registry/s3
+            substitutions:
+              registry_bucket: windsor-tst1-image-factory
+              registry_region: us-west-2
+              registry_endpoint: https://s3.us-west-2.amazonaws.com
+
+  # Replicas only scale out where the backing store is shared; a PVC cannot take two.
+  - name: scales the registry out only when object storage backs it
+    values:
+      id: tst1
+      platform: aws
+      topology: ha
+      network: *default-network
+      cluster: *default-cluster
+      aws:
+        region: us-west-2
+      addons:
+        image_factory:
+          enabled: true
+    expect:
+      flux:
+        - name: image-factory
+          install:
+            substitutions:
+              registry_replicas: "2"
+
+  # No gateway: the factory still installs, just with no external route.
+  - name: installs without a route when no gateway is enabled
+    values:
+      platform: metal
+      network: *default-network
+      cluster: *default-cluster
+      addons:
+        image_factory: *default-factory
+    expect:
+      flux:
+        - name: image-factory
+          dependsOn:
+            - pki-install
+          install:
+            components:
+              - image-factory
+
+  # Operator-supplied key: the signing-key module is skipped entirely.
+  - name: skips the signing key module when a key is supplied
+    values:
+      platform: metal
+      network: *default-network
+      cluster: *default-cluster
+      addons:
+        image_factory:
+          enabled: true
+          cache_signing_key: supplied-by-operator
+          registry:
+            schematic:
+              registry: registry.example.com
+    expect:
+      terraform: []
+      flux:
+        - name: image-factory
+          install:
+            components:
+              - image-factory
+
+  # Off by default.
+  - name: excludes the factory when the addon is disabled
+    values:
+      platform: metal
+      network: *default-network
+      cluster: *default-cluster
+      addons:
+        image_factory:
+          enabled: false
+    expect:
+      flux: []
