@@ -34,3 +34,9 @@ type: object
 #     than an extra property there.
 
 properties: {}
+
+# Core closes its own root the same way. Repeating it here keeps the root closed if
+# this fragment is ever validated without Core's, and costs nothing when it isn't:
+# the merge takes non-properties keys from whichever fragment lands last, and both
+# sides carry the same value.
+additionalProperties: false
