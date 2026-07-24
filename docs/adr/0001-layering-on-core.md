@@ -77,8 +77,8 @@ acceptable while nothing is deployed and not acceptable after that.
   there rather than a release. Together with tracking Core's `latest`, that means Manager CI
   absorbs Core and CLI breakage as it happens — the intended trade while the blueprint is
   being built out, and the reason point 5 has a deadline attached.
-- `dependsOn` has no optional form, so a dependency on a Core component that may not exist
-  has to restate the condition that enables it upstream.
+- Depending on a Core component that only exists under some conditions means restating that
+  condition, so Manager holds a copy of Core's gating that nothing keeps in sync.
 
 ## Alternatives considered
 
