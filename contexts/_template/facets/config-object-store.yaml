@@ -4,9 +4,10 @@ metadata:
   name: object-store
   description: Resolves the object storage backend for the platform and provisions its buckets
 
-# Resolves before the services that consume it, and after Core's platform layers that
-# supply platform, hetzner.object_storage.location, and aws.region.
-ordinal: 450
+# Resolves after Core's platform layers — which supply platform,
+# hetzner.object_storage.location, and aws.region — and before the Manager services that
+# consume it. Both come for free: source depth composes Manager's facets after Core's, and
+# the `config-` prefix orders this one ahead of Manager's own `addon-` facets.
 
 # =============================================================================
 # Config — effective object store
