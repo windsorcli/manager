@@ -12,6 +12,18 @@ Proposed (2026-07-23). Depends on [ADR-0001](0001-layering-on-core.md). Referenc
 [ADR-0004](../roadmap-v0.1.0.md) (Omni), which needs an identity provider before it has a
 place to keep users.
 
+Upstream, the decisions here wait on two open Core issues, and neither is Manager's to
+build:
+
+- [core#2283](https://github.com/windsorcli/core/issues/2283) — the identity addon under
+  `addons.identity`. This is the "PR 2" referred to throughout: the `platform` realm, its
+  hardening baseline, the RBAC anchor, and the clients for the add-ons Core ships. Manager's
+  clients have nothing to attach to until it lands.
+- [core#2286](https://github.com/windsorcli/core/issues/2286) — API-server OIDC
+  authentication under `cluster.oidc`. This is the home for the operator `kubectl` auth that
+  decision 2 assigns to Core, and the mechanism ADR-0006 will consume to make downstream
+  clusters trust the issuer.
+
 ## Context
 
 A management cluster needs one place its operators sign in, one issuer its services trust,
@@ -101,8 +113,12 @@ identity in one place and inherits Core's security baseline for free.
 Two things that look like they belong here do not. **Operator `kubectl` auth is Core's, not
 Manager's** — the `kubectl`/`kubelogin` OIDC client is realm-level infrastructure a single
 cluster would also want (ADR-0001 rule 1), so it lands in Core's platform-realm baseline
-alongside `platform-admins`, provided Core also owns wiring an API server to trust the issuer.
-And the **fleet operator groups are not Manager's to author** — see decision 7.
+alongside `platform-admins`, provided Core also owns wiring an API server to trust the
+issuer — which Core already tracks as
+[core#2286](https://github.com/windsorcli/core/issues/2286) (API-server OIDC under
+`cluster.oidc`), keeping the client and the flags that make it useful in one place rather
+than split across repositories. And the **fleet operator groups are not Manager's to
+author** — see decision 7.
 **A separate per-fleet realm is the named successor**: when a second tenant or a hard
 isolation boundary actually exists, Manager stands up its own realm through the same
 `KeycloakRealmImport` path Core's contract already invites — this decision is revisited, not
@@ -140,9 +156,9 @@ Core already relies on: the operator-generated initial admin secret, and operato
 client secrets consumed via `valueFrom`, with ESO layered on once it exists. Nothing in this
 ADR is blocked on that interim, but the fleet is not production until 0003 is.
 
-**6. Manager's identity facets follow ADR-0001's mechanics exactly.** Ordinal `500` or
-higher (matching `addon-image-factory`), component names Core does not use, and
-`dependsOn` on Core's canonical tier names — a client waits on `identity-resources` (the
+**6. Manager's identity facets follow ADR-0001's mechanics exactly.** Component names Core
+does not use, and `dependsOn` on Core's canonical tier names — a client waits on
+`identity-resources` (the
 server and the platform realm must exist before a client can attach to the realm), and any
 client that needs the gateway route waits on `gateway-resources`, the same names Core's own
 facet depends on. Manager's schema adds only new keys under a new path (fleet client
@@ -188,8 +204,9 @@ ADR-0004 (Omni, which authenticates against this realm) build on that contract.
   This ADR therefore stands as the boundary record; the implementing facets wait on both
   Core's PR 2 and ADR-0004, and the exploratory build on this branch was dropped rather than
   merged empty.
-- Manager depends on Core's PR 2, not just PR 1. The server is shipped; the `platform` realm,
-  the `addons.keycloak.realm` config key, and the exposed issuer URL are still planned. Until
+- Manager depends on Core's PR 2 — [core#2283](https://github.com/windsorcli/core/issues/2283)
+  — not just PR 1. The server is shipped; the `platform` realm, the `addons.keycloak.realm`
+  config key, and the exposed issuer URL are still planned. Until
   Core's PR 2 lands, Manager's clients have no realm to attach to. This is an ordering
   dependency across the two repos, and it is one-directional: Core's plan does not need
   anything from Manager, so it can proceed independently, and Manager's identity facets are

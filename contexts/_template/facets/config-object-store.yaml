@@ -4,10 +4,6 @@ metadata:
   name: object-store
   description: Resolves the object storage backend for the platform and provisions its buckets
 
-# Resolves before the services that consume it, and after Core's platform layers that
-# supply platform, hetzner.object_storage.location, and aws.region.
-ordinal: 450
-
 # =============================================================================
 # Config — effective object store
 # =============================================================================

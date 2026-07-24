@@ -4,9 +4,6 @@ metadata:
   name: image-factory
   description: Self-hosted Talos image factory for schematic and boot asset generation
 
-# Composes after every Core layer. See docs/adr/0001-layering-on-core.md.
-ordinal: 500
-
 when: addons.image_factory.enabled == true
 
 # =============================================================================

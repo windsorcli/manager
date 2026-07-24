@@ -16,12 +16,9 @@ type: object
 #     block — a new entry under `addons`, say — merges cleanly and still satisfies
 #     Core's `additionalProperties: false`.
 #
-#   - Do not redeclare a key Core owns. Fragment load order is not something to
-#     rely on: sources load in parallel goroutines, Core lands in a later round
-#     during normal composition but earlier under `windsor init --blueprint`. A
-#     conflicting declaration is resolved by whichever fragment happens to land
-#     last, and losing is silent rather than an error. To change a Core default,
-#     enum, or description, change it in Core.
+#   - Do not redeclare a key Core owns. A duplicate declaration is a second
+#     source of truth for the same key. To change a Core default, enum, or
+#     description, change it in Core.
 #
 #   - Do not define `$defs`. Unlike `properties`, `$defs` is replaced wholesale
 #     rather than merged, so one side's definitions supplant the other's and any
