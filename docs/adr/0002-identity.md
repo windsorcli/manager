@@ -140,9 +140,9 @@ Core already relies on: the operator-generated initial admin secret, and operato
 client secrets consumed via `valueFrom`, with ESO layered on once it exists. Nothing in this
 ADR is blocked on that interim, but the fleet is not production until 0003 is.
 
-**6. Manager's identity facets follow ADR-0001's mechanics exactly.** Ordinal `500` or
-higher (matching `addon-image-factory`), component names Core does not use, and
-`dependsOn` on Core's canonical tier names — a client waits on `identity-resources` (the
+**6. Manager's identity facets follow ADR-0001's mechanics exactly.** Component names Core
+does not use, and `dependsOn` on Core's canonical tier names — a client waits on
+`identity-resources` (the
 server and the platform realm must exist before a client can attach to the realm), and any
 client that needs the gateway route waits on `gateway-resources`, the same names Core's own
 facet depends on. Manager's schema adds only new keys under a new path (fleet client
