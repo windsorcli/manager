@@ -48,7 +48,7 @@ config:
 requires:
   - when: >-
       object_store.driver == 'hetzner' && (addons.image_factory.enabled ?? false) == true
-      && (env("HETZNER_S3_ACCESS_KEY") ?? '') == ''
+      && ((env("HETZNER_S3_ACCESS_KEY") ?? '') == '' || (env("HETZNER_S3_SECRET_KEY") ?? '') == '')
     paths:
       - hetzner.object_storage.access_key
       - hetzner.object_storage.secret_key
