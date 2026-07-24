@@ -7,18 +7,10 @@
 #   integration — brings a local cluster up on the composed blueprint and tears it down
 #   publish     — pushes the OCI bundle on main and tag pushes (gated on integration)
 #
-# The Windsor CLI is installed from windsorcli/action at ref main rather than a release,
-# because the composer behaviour this blueprint relies on is not in one yet. Pin to a tag
-# once a release carries all of:
-#   windsorcli/cli#3048 — a blueprint that lists sources still loads its own facets. This
-#     blueprint is exactly that shape; before the fix it silently loaded none of them.
-#   windsorcli/cli#3042 — a referencing blueprint's facets compose after its sources'.
-#     Manager dropped its hand-set ordinals on the strength of this; pinning back past it
-#     would reorder composition silently rather than fail.
-#   windsorcli/cli#3057 — stopped `terraform output -json` streaming under --verbose.
-#     Before that fix the signing key this blueprint generates was printed to a public log
-#     in cleartext despite being marked sensitive, so pinning back past it while
-#     `windsor up --verbose` stands would reintroduce the leak.
+# The Windsor CLI is installed from windsorcli/action at ref main rather than a release.
+# Pin to a tag only once one carries windsorcli/cli#3042, #3048 and #3057. The first two
+# are what let this blueprint compose at all; pinning back past #3057 would reintroduce a
+# cleartext leak of the signing key under `windsor up --verbose`.
 name: CI
 
 on:

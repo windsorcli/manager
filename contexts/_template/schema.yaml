@@ -16,12 +16,9 @@ type: object
 #     block — a new entry under `addons`, say — merges cleanly and still satisfies
 #     Core's `additionalProperties: false`.
 #
-#   - Do not redeclare a key Core owns. Validation keywords now merge
-#     conservatively (windsorcli/cli#3043), so a fragment can no longer silently
-#     loosen a constraint another fragment set — the tighter constraint wins
-#     regardless of load order. That closes the dangerous failure mode, but a
-#     duplicate declaration is still a second source of truth for the same key.
-#     To change a Core default, enum, or description, change it in Core.
+#   - Do not redeclare a key Core owns. A duplicate declaration is a second
+#     source of truth for the same key. To change a Core default, enum, or
+#     description, change it in Core.
 #
 #   - Do not define `$defs`. Unlike `properties`, `$defs` is replaced wholesale
 #     rather than merged, so one side's definitions supplant the other's and any
