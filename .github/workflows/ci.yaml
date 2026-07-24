@@ -8,13 +8,9 @@
 #   publish     — pushes the OCI bundle on main and tag pushes (gated on integration)
 #
 # The Windsor CLI is installed from windsorcli/action at ref main rather than a release.
-# The blueprint lists sources and owns its facets, a shape that silently loaded no local
-# facets before windsorcli/cli#3048, and that fix is not in a release yet. Pin this to a
-# tag once one ships that carries it — and that also carries windsorcli/cli#3057, which
-# stopped `terraform output -json` streaming under --verbose. Before that fix, the signing
-# key this blueprint generates was printed to a public log in cleartext despite being
-# marked sensitive, so pinning back past it while `windsor up --verbose` stands would
-# reintroduce the leak.
+# Pin to a tag only once one carries windsorcli/cli#3042, #3048 and #3057. The first two
+# are what let this blueprint compose at all; pinning back past #3057 would reintroduce a
+# cleartext leak of the signing key under `windsor up --verbose`.
 name: CI
 
 on:

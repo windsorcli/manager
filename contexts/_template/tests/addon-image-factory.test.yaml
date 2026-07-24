@@ -152,9 +152,8 @@ cases:
               registry_replicas: "1"
 
   # There is no hetzner case here. core:latest ships no platform-hetzner.yaml, so
-  # `platform: hetzner` fails to compose ("cni depends on non-existent component
-  # cluster") before any of this facet is reached. Add one once Core releases it; the
-  # aws case below covers the same s3 selection and substitution logic.
+  # `platform: hetzner` fails to compose before any of this facet is reached. Add one once
+  # Core releases it; the aws case below covers the same s3 selection and substitution logic.
 
   # A platform with its own object storage needs no addon to reach s3, and the bucket
   # name has to match the one config-object-store provisions.
