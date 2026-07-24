@@ -73,24 +73,12 @@ acceptable while nothing is deployed and not acceptable after that.
   sorts first.
 - Nothing warns on a component-name collision with Core until composition produces the
   wrong graph. Names are cheap to keep distinct; collisions are not.
-- Staying on `latest` means Manager CI absorbs Core and CLI breakage as it happens. That is
-  the intended trade while the blueprint is being built out, and it is the reason
-  point 5 has a deadline attached.
-
-## CLI gaps that still shape this
-
-The composer behaviour above depends on fixes carried only on CLI `main`, which is why CI
-installs from there rather than a release. Two gaps remain open:
-
-- [cli#3047](https://github.com/windsorcli/cli/issues/3047) — `dependsOn` has no optional
-  form, so a cross-source dependency has to restate the upstream's own enabling condition.
-  This is why `addon-image-factory` carries
-  `"${gateway.enabled == true ? 'gateway-install' : ''}"` rather than naming
-  `gateway-install` and letting it drop out.
-- [cli#3005](https://github.com/windsorcli/cli/issues/3005) — `Kustomization` has no
-  `spec.decryption`, which blocks Flux-native SOPS and so bears on ADR-0003.
-
-Neither blocks the decisions here.
+- The composition behaviour above is carried only on CLI `main`, so CI installs the CLI from
+  there rather than a release. Together with tracking Core's `latest`, that means Manager CI
+  absorbs Core and CLI breakage as it happens — the intended trade while the blueprint is
+  being built out, and the reason point 5 has a deadline attached.
+- `dependsOn` has no optional form, so a dependency on a Core component that may not exist
+  has to restate the condition that enables it upstream.
 
 ## Alternatives considered
 
