@@ -56,8 +56,8 @@ flux:
     secrets:
       registry-s3:
         data:
-          access_key: ${hetzner.object_storage.access_key ?? ''}
-          secret_key: ${hetzner.object_storage.secret_key ?? ''}
+          access_key: ${hetzner.object_storage.access_key ?? env("HETZNER_S3_ACCESS_KEY") ?? ''}
+          secret_key: ${hetzner.object_storage.secret_key ?? env("HETZNER_S3_SECRET_KEY") ?? ''}
       image-factory-cache-signing-key:
         data:
           cache-signing.key: ${addons.image_factory.cache_signing_key ?? terraform_output("image-factory-signing-key", "private_key_pem")}

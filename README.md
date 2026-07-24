@@ -66,20 +66,25 @@ windsor init mgmt --platform hetzner \
   --set email=platform@example.com
 ```
 
-`--set` writes these into `contexts/mgmt/values.yaml`. Add your Hetzner credentials to the
-same file, either from a secrets provider or from the environment. The object storage keys
-are only needed with the image factory enabled; Hetzner issues them from the console.
+`--set` writes these into `contexts/mgmt/values.yaml`. Credentials are the exception: export
+them instead.
+
+```bash
+export HCLOUD_TOKEN=...            # Hetzner Cloud API token
+export HETZNER_S3_ACCESS_KEY=...   # object storage, only with the image factory enabled
+export HETZNER_S3_SECRET_KEY=...   # Hetzner issues both from the console
+```
+
+To keep them out of your shell, put them in `values.yaml` as secret references instead, and
+they take precedence over the environment.
 
 ```yaml
 hetzner:
   token: ${secret("Developer", "hetzner", "token")}
   object_storage:
-    access_key: ${env("HETZNER_S3_ACCESS_KEY")}
-    secret_key: ${env("HETZNER_S3_SECRET_KEY")}
+    access_key: ${secret("Developer", "hetzner", "s3_access_key")}
+    secret_key: ${secret("Developer", "hetzner", "s3_secret_key")}
 ```
-
-`secret()` fails the run when it cannot resolve a value. `env()` returns null instead, so an
-unset or misspelled variable reaches Terraform as an empty credential rather than an error.
 
 ```bash
 windsor bootstrap mgmt
