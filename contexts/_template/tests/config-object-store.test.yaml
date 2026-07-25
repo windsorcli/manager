@@ -25,6 +25,11 @@ x-defaults:
         - /var/mnt/local
 
 cases:
+  # The hetzner credential fallback is not covered here. Its inputs only resolve under
+  # `platform: hetzner`, and core:latest ships no platform-hetzner.yaml, so the case fails
+  # to compose ("cni depends on cluster ... contributed by facet aws") before this facet is
+  # reached. Add one once Core releases the platform facet.
+
   # Buckets are only provisioned where the platform has object storage and something asks
   # for them, so this is the case that shows driver and prefix actually resolved: the
   # module is selected, and its inputs carry the region and the derived bucket name.

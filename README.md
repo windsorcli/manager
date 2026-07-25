@@ -66,12 +66,24 @@ windsor init mgmt --platform hetzner \
   --set email=platform@example.com
 ```
 
-`--set` writes these into `contexts/mgmt/values.yaml`. Add your Hetzner API token to the same
-file as a secret reference.
+`--set` writes these into `contexts/mgmt/values.yaml`. Credentials are the exception: export
+them instead.
+
+```bash
+export HCLOUD_TOKEN=...            # Hetzner Cloud API token
+export HETZNER_S3_ACCESS_KEY=...   # object storage, only with the image factory enabled
+export HETZNER_S3_SECRET_KEY=...   # Hetzner issues both from the console
+```
+
+To keep them out of your shell, put them in `values.yaml` as secret references instead, and
+they take precedence over the environment.
 
 ```yaml
 hetzner:
   token: ${secret("Developer", "hetzner", "token")}
+  object_storage:
+    access_key: ${secret("Developer", "hetzner", "s3_access_key")}
+    secret_key: ${secret("Developer", "hetzner", "s3_secret_key")}
 ```
 
 ```bash
