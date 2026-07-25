@@ -139,6 +139,16 @@
       "enabled": false
     },
     {
+      "description": "Track Core's composite actions at @main alongside the CLI; don't pin or update. The pinned tool versions they carry live in Core, so Core's renovate bumps them.",
+      "matchManagers": [
+        "github-actions"
+      ],
+      "matchPackageNames": [
+        "windsorcli/core"
+      ],
+      "enabled": false
+    },
+    {
       "description": "kustomize tags releases as kustomize/vX.Y.Z; strip the prefix so versions compare",
       "matchPackageNames": [
         "kubernetes-sigs/kustomize"
