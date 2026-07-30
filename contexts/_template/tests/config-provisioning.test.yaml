@@ -1,0 +1,112 @@
+# config-provisioning.yaml facet tests
+# `identity` is Core's flux system, `image-factory` is Manager's own.
+
+x-defaults:
+  network: &default-network
+    cidr_block: 10.5.0.0/16
+    loadbalancer_driver: kube-vip
+    loadbalancer_mode: arp
+    loadbalancer_ips:
+      start: "10.5.1.10"
+      end: "10.5.1.100"
+
+  cluster: &default-cluster
+    driver: talos
+    controlplanes:
+      nodes:
+        controlplane-1:
+          endpoint: 10.5.0.10:50000
+          node: 10.5.0.10
+          hostname: controlplane-1
+    workers:
+      volumes:
+        - /var/mnt/local
+
+  gateway: &default-gateway
+    enabled: true
+    driver: envoy
+
+cases:
+  # The switch on its own brings up both dependencies, without the operator naming either:
+  # Core's identity system (server, platform realm) and its database, plus Manager's image
+  # factory. This is the full transitive chain, not just the top-level flags.
+  - name: enabling provisioning pulls up identity and the image factory
+    values:
+      id: tst1
+      platform: metal
+      network: *default-network
+      cluster: *default-cluster
+      gateway: *default-gateway
+      provisioning:
+        enabled: true
+    expect:
+      flux:
+        - name: identity
+          install:
+            components:
+              - keycloak-operator
+          resources:
+            - components:
+                - keycloak
+                - keycloak/realm
+        - name: database
+          install:
+            components:
+              - cloudnativepg
+        - name: image-factory
+          install:
+            components:
+              - image-factory
+
+  # An operator's explicit opt-out is never overridden by the fan-out — identity stays
+  # off, but the image factory (the other half of the switch) still comes up.
+  - name: an explicit identity opt-out survives the fan-out
+    values:
+      id: tst1
+      platform: metal
+      network: *default-network
+      cluster: *default-cluster
+      gateway: *default-gateway
+      provisioning:
+        enabled: true
+      identity:
+        enabled: false
+    expect:
+      flux:
+        - name: image-factory
+    exclude:
+      flux:
+        - name: identity
+
+  # Same for the other half: an explicit image-factory opt-out survives, identity still
+  # comes up.
+  - name: an explicit image-factory opt-out survives the fan-out
+    values:
+      platform: metal
+      network: *default-network
+      cluster: *default-cluster
+      gateway: *default-gateway
+      provisioning:
+        enabled: true
+      addons:
+        image_factory:
+          enabled: false
+    expect:
+      flux:
+        - name: identity
+    exclude:
+      flux:
+        - name: image-factory
+
+  # Off by default: the switch contributes nothing.
+  - name: provisioning off pulls up nothing
+    values:
+      platform: metal
+      network: *default-network
+      cluster: *default-cluster
+      provisioning:
+        enabled: false
+    exclude:
+      flux:
+        - name: identity
+        - name: image-factory

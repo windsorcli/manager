@@ -99,6 +99,17 @@ properties:
         additionalProperties: false
         description: Self-hosted Talos image factory
 
+  # Fleet-wide capability, not a bolt-on addon — how this fleet provisions and manages
+  # downstream clusters. See config-provisioning.yaml for what enabling it turns on.
+  provisioning:
+    type: object
+    properties:
+      enabled:
+        type: boolean
+        default: false
+        description: Enable the self-hosted Omni management plane and the capabilities it depends on (identity, image factory).
+    additionalProperties: false
+
   # Sibling of Core's location, network_zone, token, and dns_parent_zone.
   hetzner:
     type: object
