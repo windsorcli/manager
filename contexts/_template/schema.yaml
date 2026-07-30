@@ -99,8 +99,8 @@ properties:
         additionalProperties: false
         description: Self-hosted Talos image factory
 
-  # Fleet-wide capability, not a bolt-on addon — how this fleet provisions and manages
-  # downstream clusters. See config-provisioning.yaml for what enabling it turns on.
+  # How this fleet provisions and manages downstream clusters. See config-provisioning.yaml 
+  # for what enabling it turns on.
   provisioning:
     type: object
     properties:
