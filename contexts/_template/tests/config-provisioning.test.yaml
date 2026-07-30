@@ -82,6 +82,7 @@ cases:
   # comes up.
   - name: an explicit image-factory opt-out survives the fan-out
     values:
+      id: tst1
       platform: metal
       network: *default-network
       cluster: *default-cluster
