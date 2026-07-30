@@ -7,10 +7,15 @@
 #   integration — brings a local cluster up on the composed blueprint and tears it down
 #   publish     — pushes the OCI bundle on main and tag pushes (gated on integration)
 #
-# The Windsor CLI is installed from windsorcli/action at ref main rather than a release.
-# Pin to a tag only once one carries windsorcli/cli#3042, #3048 and #3057. The first two
-# are what let this blueprint compose at all; pinning back past #3057 would reintroduce a
-# cleartext leak of the signing key under `windsor up --verbose`.
+# Runner prep, tool installs, and OCI publish come from Core's composite actions
+# (windsorcli/core/.github/actions/*), so the pinned tool versions live in Core and a bump
+# reaches every downstream blueprint at once. They are referenced at @main alongside the
+# Windsor CLI (windsorcli/action@main); pin both to a tag together at release.
+#
+# The Windsor CLI itself is installed from windsorcli/action at ref main rather than a
+# release. Pin to a tag only once one carries windsorcli/cli#3042, #3048 and #3057. The
+# first two are what let this blueprint compose at all; pinning back past #3057 would
+# reintroduce a cleartext leak of the signing key under `windsor up --verbose`.
 name: CI
 
 on:
@@ -30,14 +35,6 @@ permissions:
 env:
   WINDSOR_PROJECT_ROOT: ${{ github.workspace }}
   DOCKER_HOST: unix:///var/run/docker.sock
-  # renovate: datasource=github-releases depName=yq package=mikefarah/yq
-  YQ_VERSION: v4.53.3
-  # renovate: datasource=github-releases depName=prometheus/prometheus package=prometheus/prometheus
-  PROMETHEUS_VERSION: v3.13.1
-  # renovate: datasource=github-releases depName=flux package=fluxcd/flux2
-  FLUX_VERSION: v2.9.3
-  # renovate: datasource=github-releases depName=kustomize package=kubernetes-sigs/kustomize
-  KUSTOMIZE_VERSION: v5.8.1
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
@@ -75,11 +72,10 @@ jobs:
             echo "No shell scripts found to check"
           fi
 
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+      - name: Setup tools
+        uses: windsorcli/core/.github/actions/setup-tools@main
         with:
-          # renovate: datasource=github-releases depName=terraform package=hashicorp/terraform
-          terraform_version: 1.12.2
+          tools: terraform
 
       - name: Run terraform fmt
         run: terraform fmt -check -recursive
@@ -110,57 +106,19 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+      # task test runs the terraform module tests (terraform), the blueprint facet tests
+      # (windsor CLI), the PrometheusRule unit tests (yq + promtool), and the kustomize
+      # build check (kustomize).
+      - name: Setup tools
+        uses: windsorcli/core/.github/actions/setup-tools@main
         with:
-          # renovate: datasource=github-releases depName=terraform package=hashicorp/terraform
-          terraform_version: 1.12.2
+          tools: terraform,task,yq,promtool,kustomize
 
       - name: Install Windsor CLI
         uses: windsorcli/action@main
         with:
           ref: main
           context: local
-
-      - name: Install Task
-        uses: go-task/setup-task@01a4adf9db2d14c1de7a560f09170b6e0df736aa # v2.1.0
-        with:
-          version: 3.x
-
-      # yq renders each PrometheusRule's .spec for promtool; local devs get both via
-      # aqua, CI installs the same pinned versions directly.
-      - name: Install yq
-        run: |
-          cd "$(mktemp -d)" &&
-          curl -fsSLO "https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/yq_linux_amd64" &&
-          sudo install -m 0755 -o root -g root yq_linux_amd64 /usr/local/bin/yq &&
-          cd - &&
-          rm -rf "$OLDPWD" &&
-          yq --version
-
-      - name: Install promtool
-        run: |
-          cd "$(mktemp -d)" &&
-          curl -fsSLO "https://github.com/prometheus/prometheus/releases/download/${PROMETHEUS_VERSION}/prometheus-${PROMETHEUS_VERSION#v}.linux-amd64.tar.gz" &&
-          tar xzf "prometheus-${PROMETHEUS_VERSION#v}.linux-amd64.tar.gz" &&
-          sudo install -m 0755 -o root -g root "prometheus-${PROMETHEUS_VERSION#v}.linux-amd64/promtool" /usr/local/bin/promtool &&
-          cd - &&
-          rm -rf "$OLDPWD" &&
-          promtool --version
-
-      # task test builds every kustomize component: facet tests assert composition and
-      # never render a manifest, so a patch with no target passes them untouched. The
-      # release tag is kustomize/vX.Y.Z, hence the encoded slash; renovate strips the
-      # prefix via extractVersion.
-      - name: Install kustomize
-        run: |
-          cd "$(mktemp -d)" &&
-          curl -fsSLO "https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2F${KUSTOMIZE_VERSION}/kustomize_${KUSTOMIZE_VERSION}_linux_amd64.tar.gz" &&
-          tar xzf "kustomize_${KUSTOMIZE_VERSION}_linux_amd64.tar.gz" &&
-          sudo install -m 0755 -o root -g root kustomize /usr/local/bin/ &&
-          cd - &&
-          rm -rf "$OLDPWD" &&
-          kustomize version
 
       - name: Run Tests
         run: task test
@@ -179,57 +137,14 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Load br_netfilter kernel module
-        run: |
-          sudo modprobe br_netfilter
-          echo "1" | sudo tee /proc/sys/net/bridge/bridge-nf-call-iptables
-          echo "1" | sudo tee /proc/sys/net/bridge/bridge-nf-call-ip6tables
+      # br_netfilter, disk reclaim, and the Docker data-root relocation the cluster needs.
+      - name: Prepare runner
+        uses: windsorcli/core/.github/actions/prepare-runner@main
 
-      # Reclaim ~30 GB of pre-installed toolchains this repo never uses. Without it the
-      # kubelet in the Talos VM hits its ephemeral-storage eviction threshold pulling
-      # images and evicts the Flux controllers.
-      - name: Free disk space
-        run: |
-          df -h /
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
-          df -h /
-
-      - name: Configure Docker for increased storage
-        run: |
-          sudo mkdir -p /mnt/docker-data /etc/docker
-          echo '{
-            "data-root": "/mnt/docker-data",
-            "log-driver": "json-file",
-            "log-opts": {
-              "max-size": "10m",
-              "max-file": "3"
-            }
-          }' | sudo tee /etc/docker/daemon.json
-          sudo systemctl restart docker || sudo service docker restart || true
-          timeout 30 bash -c 'until docker info > /dev/null 2>&1; do sleep 1; done' || true
-          docker info | grep "Docker Root Dir" || true
-
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+      - name: Setup tools
+        uses: windsorcli/core/.github/actions/setup-tools@main
         with:
-          # renovate: datasource=github-releases depName=terraform package=hashicorp/terraform
-          terraform_version: 1.12.2
-
-      - name: Setup kubectl
-        uses: azure/setup-kubectl@829323503d1be3d00ca8346e5391ca0b07a9ab0d # v5.1.0
-        with:
-          # renovate: datasource=github-releases depName=kubectl package=kubernetes/kubectl
-          version: v1.34.1
-
-      - name: Install Flux CLI
-        run: |
-          cd "$(mktemp -d)" &&
-          curl -fsSLO "https://github.com/fluxcd/flux2/releases/download/${FLUX_VERSION}/flux_${FLUX_VERSION#v}_linux_amd64.tar.gz" &&
-          tar xzf "flux_${FLUX_VERSION#v}_linux_amd64.tar.gz" &&
-          sudo install -m 0755 -o root -g root flux /usr/local/bin/ &&
-          cd - &&
-          rm -rf "$OLDPWD" &&
-          flux --version
+          tools: terraform,kubectl,flux
 
       - name: Install Windsor CLI
         uses: windsorcli/action@main
@@ -314,11 +229,10 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+      - name: Setup tools
+        uses: windsorcli/core/.github/actions/setup-tools@main
         with:
-          # renovate: datasource=github-releases depName=terraform package=hashicorp/terraform
-          terraform_version: 1.12.2
+          tools: terraform
 
       - name: Install Windsor CLI
         uses: windsorcli/action@main
@@ -326,22 +240,8 @@ jobs:
           ref: main
           context: local
 
-      - name: Login to GitHub Container Registry
-        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+      - name: Publish OCI package
+        uses: windsorcli/core/.github/actions/publish-oci@main
         with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Publish to OCI Registry
-        env:
-          TAG: ${{ github.ref_name }}
-        run: |
-          windsor push oci://ghcr.io/windsorcli/manager:${TAG}
-
-      - name: Publish Latest Tag
-        if: github.ref == 'refs/heads/main'
-        env:
-          TAG: latest
-        run: |
-          windsor push oci://ghcr.io/windsorcli/manager:${TAG}
+          image: ghcr.io/windsorcli/manager
+          token: ${{ secrets.GITHUB_TOKEN }}
