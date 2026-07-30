@@ -1,0 +1,23 @@
+kind: Facet
+apiVersion: blueprints.windsorcli.dev/v1alpha1
+metadata:
+  name: provisioning
+  description: Turns on the capabilities downstream cluster provisioning depends on
+
+# Omni authenticates operators against the cluster identity provider and provisions Talos
+# machines from the image factory. `provisioning.enabled` turns both on so an operator sets
+# one flag instead of two. Identity is Core's, not Manager's; each fan-out uses the
+# `!= false` idiom (on unless explicitly disabled) so an operator can opt a single
+# capability back out while leaving the switch itself on.
+config:
+
+  # Core's identity facet hosts Keycloak and, through it, the database the server needs.
+  - name: identity
+    when: provisioning.enabled == true
+    value:
+      enabled: ${identity.enabled != false}
+
+  - name: image_factory
+    when: provisioning.enabled == true
+    value:
+      enabled: ${image_factory.enabled != false}

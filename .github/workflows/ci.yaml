@@ -173,7 +173,7 @@ jobs:
         run: |
           windsor init local --reset \
             --set dns.domain=test \
-            --set addons.image_factory.enabled=true
+            --set image_factory.enabled=true
 
       - name: Show blueprint
         run: windsor show blueprint

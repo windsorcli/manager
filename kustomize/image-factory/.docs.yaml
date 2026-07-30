@@ -56,7 +56,7 @@ components:
     description: "Backs the registry with a bucket from the platform's object store instead of a volume. Limited to the platforms the registry holds credentials for: Hetzner keys come from `hetzner.object_storage`, and on AWS an empty key pair leaves the S3 driver on the instance credential chain. A minio object store stays on a PVC until credentials for one exist."
 
   image-factory:
-    enable_when: "`addons.image_factory.enabled == true`"
+    enable_when: "`image_factory.enabled == true`"
     description: "Helm release of the Sidero Labs `image-factory` chart in `image-factory`, from `oci://ghcr.io/siderolabs/charts`. Serves the UI, API, and registry frontends on :8080. Runs as uid 1000, non-root, baseline PSA-compatible. The chart supports only the Recreate deployment strategy."
   image-factory/ha:
     enable_when: "`topology == 'ha'`"

@@ -4,7 +4,7 @@ metadata:
   name: image-factory
   description: Self-hosted Talos image factory for schematic and boot asset generation
 
-when: addons.image_factory.enabled == true
+when: image_factory.enabled == true
 
 # =============================================================================
 # Requires
@@ -20,7 +20,7 @@ terraform:
 
   - name: image-factory-signing-key
     path: keys/signing
-    when: (addons.image_factory.cache_signing_key ?? '') == ''
+    when: (image_factory.cache_signing_key ?? '') == ''
 
 # =============================================================================
 # Flux system — image factory
@@ -57,13 +57,13 @@ flux:
           secret_key: ${hetzner.object_storage.secret_key ?? env("HETZNER_S3_SECRET_KEY") ?? ''}
       image-factory-cache-signing-key:
         data:
-          cache-signing.key: ${addons.image_factory.cache_signing_key ?? terraform_output("image-factory-signing-key", "private_key_pem")}
+          cache-signing.key: ${image_factory.cache_signing_key ?? terraform_output("image-factory-signing-key", "private_key_pem")}
     install:
       components:
         - image-factory
-        - "${(addons.image_factory.registry.schematic.registry ?? '') == '' ? 'registry' : ''}"
-        - "${(addons.image_factory.registry.schematic.registry ?? '') == '' && (object_store.driver == 'hetzner' || object_store.driver == 'aws') ? 'registry/s3' : ''}"
-        - "${(addons.image_factory.registry.schematic.registry ?? '') == '' && object_store.driver != 'hetzner' && object_store.driver != 'aws' ? 'registry/pvc' : ''}"
+        - "${(image_factory.registry.schematic.registry ?? '') == '' ? 'registry' : ''}"
+        - "${(image_factory.registry.schematic.registry ?? '') == '' && (object_store.driver == 'hetzner' || object_store.driver == 'aws') ? 'registry/s3' : ''}"
+        - "${(image_factory.registry.schematic.registry ?? '') == '' && object_store.driver != 'hetzner' && object_store.driver != 'aws' ? 'registry/pvc' : ''}"
         - "${topology == 'ha' ? 'image-factory/ha' : ''}"
         - "${(telemetry.metrics.enabled ?? false) == true ? 'image-factory/prometheus' : ''}"
       substitutions:
@@ -73,25 +73,25 @@ flux:
         registry_region: "${object_store.region ?? ''}"
         registry_endpoint: "${object_store.endpoint ?? ''}"
         registry_storage_class: "${cluster.storage.class ?? 'single'}"
-        registry_storage_size: "${addons.image_factory.registry_size ?? '10Gi'}"
+        registry_storage_size: "${image_factory.registry_size ?? '10Gi'}"
         registry_replicas: "${topology == 'ha' && (object_store.driver == 'hetzner' || object_store.driver == 'aws') ? 2 : 1}"
         external_domain: "${(dns.public_domain ?? '') == '' ? (dns.private_domain ?? dns.domain ?? '') : dns.public_domain}"
         # Explicit override wins; else derive from the domain the route publishes on.
         # docker-desktop reaches the gateway on 8443 rather than 443.
         factory_external_url: >-
-          ${addons.image_factory.external_url
+          ${image_factory.external_url
             ?? ('https://factory.' + ((dns.public_domain ?? '') == ''
                   ? (dns.private_domain ?? dns.domain ?? '')
                   : dns.public_domain)
                 + (workstation.runtime == 'docker-desktop' ? ':8443' : ''))}
-        factory_schematic_registry: "${addons.image_factory.registry.schematic.registry ?? 'registry.image-factory.svc.cluster.local:5000'}"
-        factory_schematic_namespace: "${addons.image_factory.registry.schematic.namespace ?? 'siderolabs/image-factory'}"
-        factory_schematic_repository: "${addons.image_factory.registry.schematic.repository ?? 'schematics'}"
-        factory_schematic_insecure: "${(addons.image_factory.registry.schematic.registry ?? '') == '' ? true : (addons.image_factory.registry.schematic.insecure ?? false)}"
-        factory_max_concurrency: "${addons.image_factory.max_concurrency ?? 6}"
-        factory_min_talos_version: "${addons.image_factory.min_talos_version ?? '1.2.0'}"
-        factory_cache_registry: "${addons.image_factory.registry.schematic.registry ?? 'registry.image-factory.svc.cluster.local:5000'}"
-        factory_cache_insecure: "${(addons.image_factory.registry.schematic.registry ?? '') == '' ? true : (addons.image_factory.registry.schematic.insecure ?? false)}"
+        factory_schematic_registry: "${image_factory.registry.schematic.registry ?? 'registry.image-factory.svc.cluster.local:5000'}"
+        factory_schematic_namespace: "${image_factory.registry.schematic.namespace ?? 'siderolabs/image-factory'}"
+        factory_schematic_repository: "${image_factory.registry.schematic.repository ?? 'schematics'}"
+        factory_schematic_insecure: "${(image_factory.registry.schematic.registry ?? '') == '' ? true : (image_factory.registry.schematic.insecure ?? false)}"
+        factory_max_concurrency: "${image_factory.max_concurrency ?? 6}"
+        factory_min_talos_version: "${image_factory.min_talos_version ?? '1.2.0'}"
+        factory_cache_registry: "${image_factory.registry.schematic.registry ?? 'registry.image-factory.svc.cluster.local:5000'}"
+        factory_cache_insecure: "${(image_factory.registry.schematic.registry ?? '') == '' ? true : (image_factory.registry.schematic.insecure ?? false)}"
       timeout: 10m
       interval: 5m
     resources:

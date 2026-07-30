@@ -3,7 +3,7 @@
 # every object store the platform resolves to, and exclusion when the addon is off.
 #
 # The registry components only appear when no external registry is named, so the cases
-# that exercise them leave addons.image_factory.registry unset.
+# that exercise them leave image_factory.registry unset.
 
 x-defaults:
   network: &default-network
@@ -42,8 +42,7 @@ cases:
       gateway:
         enabled: true
         driver: envoy
-      addons:
-        image_factory: *default-factory
+      image_factory: *default-factory
     expect:
       terraform:
         - name: image-factory-signing-key
@@ -83,11 +82,11 @@ cases:
           enabled: true
           driver: minio
           endpoint: https://minio.system-object-store.svc:9000
-        image_factory:
-          enabled: true
-          registry:
-            schematic:
-              registry: registry.example.com
+      image_factory:
+        enabled: true
+        registry:
+          schematic:
+            registry: registry.example.com
     expect:
       flux:
         - name: image-factory
@@ -107,9 +106,8 @@ cases:
       platform: metal
       network: *default-network
       cluster: *default-cluster
-      addons:
-        image_factory:
-          enabled: true
+      image_factory:
+        enabled: true
     expect:
       flux:
         - name: image-factory
@@ -135,8 +133,8 @@ cases:
           enabled: true
           driver: minio
           endpoint: https://minio.system-object-store.svc:9000
-        image_factory:
-          enabled: true
+      image_factory:
+        enabled: true
     expect:
       flux:
         - name: image-factory
@@ -165,9 +163,8 @@ cases:
       cluster: *default-cluster
       aws:
         region: us-west-2
-      addons:
-        image_factory:
-          enabled: true
+      image_factory:
+        enabled: true
     expect:
       terraform:
         - name: object-store
@@ -197,9 +194,8 @@ cases:
       cluster: *default-cluster
       aws:
         region: us-west-2
-      addons:
-        image_factory:
-          enabled: true
+      image_factory:
+        enabled: true
     expect:
       flux:
         - name: image-factory
@@ -213,8 +209,7 @@ cases:
       platform: metal
       network: *default-network
       cluster: *default-cluster
-      addons:
-        image_factory: *default-factory
+      image_factory: *default-factory
     expect:
       flux:
         - name: image-factory
@@ -230,13 +225,12 @@ cases:
       platform: metal
       network: *default-network
       cluster: *default-cluster
-      addons:
-        image_factory:
-          enabled: true
-          cache_signing_key: supplied-by-operator
-          registry:
-            schematic:
-              registry: registry.example.com
+      image_factory:
+        enabled: true
+        cache_signing_key: supplied-by-operator
+        registry:
+          schematic:
+            registry: registry.example.com
     expect:
       terraform: []
       flux:
@@ -251,8 +245,7 @@ cases:
       platform: metal
       network: *default-network
       cluster: *default-cluster
-      addons:
-        image_factory:
-          enabled: false
+      image_factory:
+        enabled: false
     expect:
       flux: []

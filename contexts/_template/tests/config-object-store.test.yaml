@@ -41,9 +41,8 @@ cases:
       cluster: *default-cluster
       aws:
         region: us-west-2
-      addons:
-        image_factory:
-          enabled: true
+      image_factory:
+        enabled: true
     expect:
       terraform:
         - name: object-store
