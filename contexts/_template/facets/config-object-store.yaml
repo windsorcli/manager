@@ -36,10 +36,10 @@ config:
       region: "${aws.region}"
 
   - name: object_store
-    when: platform != 'hetzner' && platform != 'aws' && (addons.object_store.enabled ?? false) == true
+    when: platform != 'hetzner' && platform != 'aws' && (object_store.enabled ?? false) == true
     value:
       driver: minio
-      endpoint: "${addons.object_store.endpoint ?? ''}"
+      endpoint: "${object_store.minio.endpoint ?? ''}"
       region: ""
 
 # =============================================================================
@@ -58,7 +58,7 @@ requires:
 
   - when: object_store.driver == 'minio' && (image_factory.enabled ?? false) == true
     paths:
-      - addons.object_store.endpoint
+      - object_store.minio.endpoint
     message: >-
       Core's object store addon installs the MinIO operator but creates no Tenant, so the
       S3 endpoint of the Tenant serving these buckets has to be given explicitly.

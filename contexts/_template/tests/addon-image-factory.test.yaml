@@ -77,10 +77,9 @@ cases:
       telemetry:
         metrics:
           enabled: true
-      addons:
-        object_store:
-          enabled: true
-          driver: minio
+      object_store:
+        enabled: true
+        minio:
           endpoint: https://minio.system-object-store.svc:9000
       image_factory:
         enabled: true
@@ -128,10 +127,9 @@ cases:
       platform: metal
       network: *default-network
       cluster: *default-cluster
-      addons:
-        object_store:
-          enabled: true
-          driver: minio
+      object_store:
+        enabled: true
+        minio:
           endpoint: https://minio.system-object-store.svc:9000
       image_factory:
         enabled: true

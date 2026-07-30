@@ -32,18 +32,20 @@ type: object
 
 properties:
 
-  # Core owns `addons`; its `additionalProperties: false` is not restated here.
-  addons:
+  # Sibling of Core's enabled/driver on the same block. Nested under minio, not a flat
+  # sibling of driver, because config-object-store.yaml computes its own flat driver and
+  # endpoint on this same object_store key — a raw operator field of the same name would
+  # collide with that computed value.
+  object_store:
     type: object
     properties:
-
-      # Sibling of Core's enabled/driver on the same block.
-      object_store:
+      minio:
         type: object
         properties:
           endpoint:
             type: string
             description: S3 endpoint of the MinIO Tenant serving buckets. Core's addon installs the operator but creates no Tenant, so on platforms with no managed object storage this has to be given explicitly.
+        additionalProperties: false
 
   # Self-hosted Talos image/schematic generation. Independently enable-able — a single
   # cluster wanting air-gapped, version-pinned Talos assets needs this without needing
