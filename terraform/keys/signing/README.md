@@ -11,7 +11,7 @@ against the matching public key, which makes rotation a breaking change: assets 
 with the previous key no longer verify.
 
 Consumed through `terraform_output("image-factory-signing-key", "private_key_pem")`. The
-facet skips this module when `addons.image_factory.cache_signing_key` is set.
+facet skips this module when `image_factory.cache_signing_key` is set.
 
 <!-- BEGIN_TF_DOCS -->
 ## Requirements

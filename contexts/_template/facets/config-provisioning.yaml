@@ -17,8 +17,7 @@ config:
     value:
       enabled: ${identity.enabled != false}
 
-  - name: addons
+  - name: image_factory
     when: provisioning.enabled == true
     value:
-      image_factory:
-        enabled: ${addons.image_factory.enabled != false}
+      enabled: ${image_factory.enabled != false}

@@ -88,9 +88,8 @@ cases:
       gateway: *default-gateway
       provisioning:
         enabled: true
-      addons:
-        image_factory:
-          enabled: false
+      image_factory:
+        enabled: false
     expect:
       flux:
         - name: identity
