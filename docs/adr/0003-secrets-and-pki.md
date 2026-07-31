@@ -9,9 +9,9 @@ description: "Core is proposing, not building, the two pieces this depends on: a
 
 Proposed (2026-07-31). Depends on [ADR-0001](0001-layering-on-core.md). Referenced by
 [ADR-0002](0002-identity.md) for where Keycloak's admin credential and client secrets live,
-and for the private-PKI alternative to the public-certificate OIDC issuer. Blocks
-[ADR-0004](../roadmap-v0.1.0.md) (Omni), which needs somewhere to keep its own secrets before
-it can run in anything but demo mode.
+and for the private-PKI alternative to the public-certificate OIDC issuer. Blocks ADR-0004
+(Omni, not yet written — see the [roadmap](../roadmap-v0.1.0.md)), which needs somewhere to
+keep its own secrets before it can run in anything but demo mode.
 
 Unlike ADR-0002, this ADR is written entirely ahead of the Core work it depends on: neither
 [core#2284](https://github.com/windsorcli/core/issues/2284) (External Secrets Operator) nor
