@@ -8,9 +8,9 @@ description: "Core's Keycloak addon stands up the server (operator, Keycloak CR,
 ## Status
 
 Proposed (2026-07-23). Depends on [ADR-0001](0001-layering-on-core.md). References
-[ADR-0003](../roadmap-v0.1.0.md) (secrets and PKI) for where credentials live, and blocks
-[ADR-0004](../roadmap-v0.1.0.md) (Omni), which needs an identity provider before it has a
-place to keep users.
+[ADR-0003](0003-secrets-and-pki.md) (secrets and PKI) for where credentials live, and blocks
+ADR-0004 (Omni, not yet written — see the [roadmap](../roadmap-v0.1.0.md)), which needs an
+identity provider before it has a place to keep users.
 
 Upstream, the decisions here wait on two open Core issues, and neither is Manager's to
 build:
