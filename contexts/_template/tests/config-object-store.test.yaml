@@ -1,7 +1,7 @@
 # config-object-store.yaml facet tests
-# Bucket provisioning is gated on a consumer asking for it, so the aws case enables the
-# image factory to make the module selectable and then asserts its inputs — that is the
-# only case here that can fail. See the note above the two that follow it.
+# Bucket provisioning is gated on a consumer asking for it, so the hetzner and aws cases
+# enable the image factory to make the module selectable and then assert its inputs — those
+# are the only cases here that can fail. See the note above the two that follow them.
 
 x-defaults:
   network: &default-network
@@ -25,14 +25,39 @@ x-defaults:
         - /var/mnt/local
 
 cases:
-  # The hetzner credential fallback is not covered here. Its inputs only resolve under
-  # `platform: hetzner`, and core:latest ships no platform-hetzner.yaml, so the case fails
-  # to compose ("cni depends on cluster ... contributed by facet aws") before this facet is
-  # reached. Add one once Core releases the platform facet.
-
   # Buckets are only provisioned where the platform has object storage and something asks
   # for them, so this is the case that shows driver and prefix actually resolved: the
-  # module is selected, and its inputs carry the region and the derived bucket name.
+  # module is selected, and its inputs carry the location and the derived bucket name. The
+  # env credential fallback is what makes this resolve at all — without
+  # HETZNER_S3_ACCESS_KEY/SECRET_KEY the requires guard excludes the facet before the
+  # module is ever selected.
+  - name: provisions a bucket on hetzner when a consumer asks for one
+    env:
+      HETZNER_S3_ACCESS_KEY: test-access
+      HETZNER_S3_SECRET_KEY: test-secret
+    values:
+      id: tst1
+      platform: hetzner
+      hetzner:
+        token: dummy-token
+        location: fsn1
+        network_zone: eu-central
+      network: *default-network
+      cluster: *default-cluster
+      image_factory:
+        enabled: true
+    expect:
+      terraform:
+        - name: object-store
+          path: object-store/hetzner
+          inputs:
+            location: fsn1
+            buckets:
+              - windsor-tst1-image-factory
+
+  # Same shape as the hetzner case above, on the platform where object storage needs no
+  # addon to reach s3, and the bucket name has to match the one config-object-store
+  # provisions.
   - name: provisions a bucket on aws when a consumer asks for one
     values:
       id: tst1

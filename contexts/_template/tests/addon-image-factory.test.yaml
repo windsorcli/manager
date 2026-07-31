@@ -147,12 +147,39 @@ cases:
               registry_endpoint: https://minio.system-object-store.svc:9000
               registry_replicas: "1"
 
-  # There is no hetzner case here. core:latest ships no platform-hetzner.yaml, so
-  # `platform: hetzner` fails to compose before any of this facet is reached. Add one once
-  # Core releases it; the aws case below covers the same s3 selection and substitution logic.
-
   # A platform with its own object storage needs no addon to reach s3, and the bucket
-  # name has to match the one config-object-store provisions.
+  # name has to match the one config-object-store provisions. The env credential fallback
+  # is what lets this resolve at all — see config-object-store's own hetzner case.
+  - name: derives the bucket, region, and endpoint from the platform on hetzner
+    env:
+      HETZNER_S3_ACCESS_KEY: test-access
+      HETZNER_S3_SECRET_KEY: test-secret
+    values:
+      id: tst1
+      platform: hetzner
+      hetzner:
+        token: dummy-token
+        location: fsn1
+        network_zone: eu-central
+      network: *default-network
+      cluster: *default-cluster
+      image_factory:
+        enabled: true
+    expect:
+      flux:
+        - name: image-factory
+          install:
+            components:
+              - image-factory
+              - registry
+              - registry/s3
+            substitutions:
+              registry_bucket: windsor-tst1-image-factory
+              registry_region: fsn1
+              registry_endpoint: https://fsn1.your-objectstorage.com
+
+  # Same shape as the hetzner case above, on the platform where object storage needs no
+  # addon to reach s3.
   - name: derives the bucket, region, and endpoint from the platform on aws
     values:
       id: tst1
