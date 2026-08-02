@@ -1,6 +1,6 @@
 ---
 title: "ADR-0002: Identity — where Core's Keycloak ends and the fleet's begins"
-description: "Core's `identity` capability (driver keycloak, promoted from the earlier `addons.keycloak` sketch) stands up the server (operator, Keycloak CR, Postgres backend, gateway route), a `platform` realm with a security baseline, an RBAC anchor, OIDC clients for the add-ons Core itself ships, and a consumer-extension contract (`identity_effective.{realm,issuer,backchannel_issuer}`) — all shipped, plus a `cluster.oidc` block that wires the kube-apiserver's own OIDC flags on Talos, falling back to the hosted issuer by default. This ADR draws the identity boundary the same way ADR-0001 drew the layering one: Core owns the server and the platform realm because a single cluster wants hardened SSO too, and Manager consumes Core's contract as just another blueprint — adding a KeycloakOIDCClient only for the fleet-only services Core doesn't ship (Omni first) and distributing the downstream-issuer trust. Manager reuses the platform realm rather than forking its own, which means it can add clients but nothing realm-level: operator kubectl auth, the fleet groups, and upstream IdP federation are all Core's by mechanism. With both Core dependencies now shipped, this cut still has no Manager resource to build — the ADR stands as the boundary record and implementation waits on ADR-0004 (Omni), the first fleet service Manager would client. Secrets are deferred to ADR-0003, and wiring the issuer into downstream machine config is deferred to ADR-0006."
+description: "Core's `identity` capability (driver keycloak, promoted from the earlier `addons.keycloak` sketch) stands up the server (operator, Keycloak CR, Postgres backend, gateway route), a `platform` realm with a security baseline, an RBAC anchor, OIDC clients for the add-ons Core itself ships, and a consumer-extension contract (`identity_effective.{realm,issuer,backchannel_issuer}`) — all shipped, plus a `cluster.oidc` block that wires the kube-apiserver's own OIDC flags on Talos, falling back to the hosted issuer by default. This ADR draws the identity boundary the same way ADR-0001 drew the layering one: Core owns the server and the platform realm because a single cluster wants hardened SSO too, and Manager consumes Core's contract as just another blueprint — adding a Keycloak client (`KeycloakOIDCClient` or, where the consumer needs group-to-role mapping and OIDC doesn't have it yet — Omni first, see [ADR-0004](0004-omni.md) — `KeycloakSAMLClient`) only for the fleet-only services Core doesn't ship, and distributing the downstream-issuer trust. Manager reuses the platform realm rather than forking its own, which means it can add clients but nothing realm-level: operator kubectl auth, the fleet groups, and upstream IdP federation are all Core's by mechanism. With both Core dependencies now shipped, this cut still has no Manager resource to build — the ADR stands as the boundary record and implementation waits on ADR-0004 (Omni), the first fleet service Manager would client. Secrets are deferred to ADR-0003, and wiring the issuer into downstream machine config is deferred to ADR-0006."
 ---
 
 # ADR-0002: Identity — where Core's Keycloak ends and the fleet's begins
@@ -125,11 +125,15 @@ Core; Manager is not privileged, it is just the first consumer.
 as an open question, whether consumers are comfortable adding clients to the platform realm
 instead of always standing up their own — and from the Manager side the answer is yes.
 Operators and management services live in the one realm Core already hardens
-(`identity.keycloak.realm`, default `platform`). What Manager adds to that realm is a
-`KeycloakOIDCClient` per **fleet service Core does not ship** — Omni (ADR-0004) is the first;
-later a fleet dashboard or fleet API is the same shape. Group membership drives role, and the
-group-claim-to-RBAC mapping is the contract every consumer reads. One realm keeps operator
-identity in one place and inherits Core's security baseline for free.
+(`identity.keycloak.realm`, default `platform`). What Manager adds to that realm is a Keycloak
+client per **fleet service Core does not ship** — Omni (ADR-0004) is the first; later a fleet
+dashboard or fleet API is the same shape. Group membership drives role, and the
+group-claim-to-RBAC mapping is the contract every consumer reads — which client CRD gets that
+mapping is a per-consumer choice: Omni's OIDC provider has no group-claim mapping yet, so
+[ADR-0004](0004-omni.md) uses `KeycloakSAMLClient` for it instead, with `KeycloakOIDCClient`
+as the default for anything that supports OIDC claim mapping natively (Core's own add-on
+clients all do). One realm keeps operator identity in one place and inherits Core's security
+baseline for free.
 
 Two things that look like they belong here do not. **Operator `kubectl` auth is Core's, not
 Manager's** — the `kubectl`/`kubelogin` OIDC client is realm-level infrastructure a single
