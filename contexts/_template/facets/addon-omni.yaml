@@ -159,7 +159,11 @@ flux:
         keycloak_saml_url: "${identity_effective.backchannel_issuer}/protocol/saml/descriptor"
         keycloak_realm: "${identity_effective.realm}"
         keycloak_admin_secret: "${(identity_effective.admin_password ?? '') != '' ? 'keycloak-bootstrap-admin' : 'keycloak-initial-admin'}"
-        omni_saml_entity_id: "https://${omni_effective.hostname}${omni_effective.external_port_suffix}"
+        # crewjam/saml (Omni's SAML library) has no configured EntityID, so it
+        # falls back to its own metadata URL as the issuer — not the bare root
+        # URL — per samlsp.DefaultServiceProvider (samlsp/new.go): metadataURL :=
+        # opts.URL.ResolveReference(&url.URL{Path: "saml/metadata"}).
+        omni_saml_entity_id: "https://${omni_effective.hostname}${omni_effective.external_port_suffix}/saml/metadata"
         omni_saml_acs_url: "https://${omni_effective.hostname}${omni_effective.external_port_suffix}/saml/acs"
       timeout: 10m
       interval: 5m
