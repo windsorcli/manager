@@ -166,7 +166,7 @@ cases:
               omni_hostname: omni.fleet.example.com
               omni_kube_proxy_hostname: omni-kube.cluster.local
               omni_machine_api_hostname: omni-siderolink.cluster.local
-              omni_image_factory_url: http://image-factory.image-factory.svc.cluster.local:8080
+              omni_image_factory_url: https://factory.cluster.local
 
   # telemetry.metrics.enabled adds the metrics component.
   - name: adds the prometheus component when metrics are enabled
