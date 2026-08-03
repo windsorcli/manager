@@ -16,6 +16,18 @@ requires:
       - omni.etcd_encryption_key
     message: Omni needs a GPG-armored private key to decrypt its etcd master key. Generate one with `(export GNUPGHOME=$(mktemp -d); gpg --batch --passphrase '' --quick-gen-key x; gpg -a --export-secret-key > omni.asc; rm -rf $GNUPGHOME)` and set omni.etcd_encryption_key via a secret() reference.
 
+# =============================================================================
+# Terraform — account ID
+# =============================================================================
+# Generated once and held in state. The chart refuses to install without it, and it
+# must stay fixed for the lifetime of the installation, so the module is only applied
+# when the operator supplies no ID.
+terraform:
+
+  - name: omni-account-id
+    path: keys/omni-account-id
+    when: (omni.account_id ?? '') == ''
+
 config:
   # One base hostname; the Kubernetes proxy and SideroLink machine API endpoints are
   # subdomains of it, matching the chart's own example layout (omni.example.com,
@@ -89,6 +101,7 @@ flux:
         - omni/saml-client
         - "${(telemetry.metrics.enabled ?? false) == true ? 'omni/prometheus' : ''}"
       substitutions:
+        omni_account_id: "${omni.account_id ?? terraform_output('omni-account-id', 'id')}"
         omni_hostname: "${omni_effective.hostname}"
         omni_kube_proxy_hostname: "kubernetes.${omni_effective.hostname}"
         omni_machine_api_hostname: "siderolink.${omni_effective.hostname}"

@@ -49,6 +49,9 @@ cases:
         enabled: true
       omni: *default-omni
     expect:
+      terraform:
+        - name: omni-account-id
+          path: keys/omni-account-id
       flux:
         - name: omni
           dependsOn:
@@ -66,6 +69,29 @@ cases:
               omni_image_factory_url: https://factory.talos.dev
             timeout: 10m
             interval: 5m
+
+  # Operator-supplied account ID: the terraform module is skipped entirely.
+  - name: skips the account id module when an id is supplied
+    values:
+      platform: metal
+      network: *default-network
+      cluster: *default-cluster
+      dns:
+        private_domain: cluster.local
+      identity:
+        enabled: true
+      provisioning:
+        enabled: true
+      omni:
+        <<: *default-omni
+        account_id: 550e8400-e29b-41d4-a716-446655440000
+    expect:
+      terraform: []
+      flux:
+        - name: omni
+          install:
+            substitutions:
+              omni_account_id: 550e8400-e29b-41d4-a716-446655440000
 
   # Explicit hostname override and a self-hosted image factory both flow through.
   - name: honors an explicit hostname and points at the self-hosted image factory

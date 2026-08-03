@@ -28,6 +28,8 @@ spec:
     # Single replica: embedded etcd does not support multiple active writers.
     replicaCount: 1
     config:
+      account:
+        id: ${omni_account_id}
       services:
         api:
           advertisedURL: https://${omni_hostname}

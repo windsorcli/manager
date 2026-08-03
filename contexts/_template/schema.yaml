@@ -124,6 +124,9 @@ properties:
       hostname:
         type: string
         description: Base hostname Omni's UI/API advertises. Derived as omni.<domain> when unset; the Kubernetes proxy and SideroLink machine API endpoints are derived from this same base (kubernetes.<hostname>, siderolink.<hostname>).
+      account_id:
+        type: string
+        description: UUID for config.account.id. Must not change for the lifetime of the installation. Terraform-generated and held in state when unset.
       wireguard:
         type: object
         properties:
