@@ -31,18 +31,16 @@ spec:
       account:
         id: ${omni_account_id}
       services:
+        # No certFile/keyFile: TLS terminates at the shared gateway (HTTPRoutes in
+        # the omni/gateway component), the same pattern Keycloak uses. Only
+        # SideroLink's raw WireGuard tunnel can't fit that model, so it keeps its
+        # own dedicated Service below.
         api:
           advertisedURL: https://${omni_hostname}
-          certFile: /certs/api/tls.crt
-          keyFile: /certs/api/tls.key
         kubernetesProxy:
           advertisedURL: https://${omni_kube_proxy_hostname}
-          certFile: /certs/kube-proxy/tls.crt
-          keyFile: /certs/kube-proxy/tls.key
         machineAPI:
           advertisedURL: https://${omni_machine_api_hostname}
-          certFile: /certs/machine-api/tls.crt
-          keyFile: /certs/machine-api/tls.key
         siderolink:
           wireGuard:
             advertisedEndpoint: ${omni_wireguard_advertised_endpoint}
@@ -72,31 +70,11 @@ spec:
       enabled: true
       storageClassName: ${omni_persistence_storage_class}
       size: ${omni_persistence_size}
-    extraVolumes:
-      - name: api-tls
-        secret:
-          secretName: omni-api-tls
-      - name: kube-proxy-tls
-        secret:
-          secretName: omni-kube-proxy-tls
-      - name: machine-api-tls
-        secret:
-          secretName: omni-machine-api-tls
-    extraVolumeMounts:
-      - name: api-tls
-        mountPath: /certs/api
-        readOnly: true
-      - name: kube-proxy-tls
-        mountPath: /certs/kube-proxy
-        readOnly: true
-      - name: machine-api-tls
-        mountPath: /certs/machine-api
-        readOnly: true
+    # main and k8sProxy stay ClusterIP (chart default) — the gateway reaches them
+    # internally. wireguard is the one Service that needs external exposure of its
+    # own, the same NodePort/LoadBalancer split CoreDNS's own loadbalancer
+    # component uses for its UDP traffic.
     service:
-      main:
-        type: ${omni_wireguard_service_type}
-      k8sProxy:
-        type: ${omni_wireguard_service_type}
       wireguard:
         type: ${omni_wireguard_service_type}
     resources:

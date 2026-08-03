@@ -64,7 +64,6 @@ cases:
       flux:
         - name: omni
           dependsOn:
-            - pki-install
             - identity-resources
           install:
             components:
@@ -72,12 +71,19 @@ cases:
               - omni/saml-client
             substitutions:
               omni_hostname: omni.cluster.local
-              omni_kube_proxy_hostname: kubernetes.omni.cluster.local
-              omni_machine_api_hostname: siderolink.omni.cluster.local
+              omni_kube_proxy_hostname: omni-kube.cluster.local
+              omni_machine_api_hostname: omni-siderolink.cluster.local
               omni_persistence_size: 16Gi
               omni_image_factory_url: https://factory.talos.dev
             timeout: 10m
             interval: 5m
+          resources:
+            - dependsOn:
+                - gateway-resources
+              components:
+                - omni/gateway
+              substitutions:
+                external_domain: cluster.local
 
   # Operator-supplied account ID: the terraform module is skipped entirely.
   - name: skips the account id module when an id is supplied
@@ -127,9 +133,12 @@ cases:
         - name: omni
           install:
             substitutions:
+              # kube-proxy/machine-api are fixed siblings under dns.domain (they
+              # have to fit the gateway's own wildcard cert SAN), not subdomains of
+              # a possibly-arbitrary custom omni.hostname.
               omni_hostname: omni.fleet.example.com
-              omni_kube_proxy_hostname: kubernetes.omni.fleet.example.com
-              omni_machine_api_hostname: siderolink.omni.fleet.example.com
+              omni_kube_proxy_hostname: omni-kube.cluster.local
+              omni_machine_api_hostname: omni-siderolink.cluster.local
               omni_image_factory_url: https://factory.cluster.local
 
   # telemetry.metrics.enabled adds the metrics component.
@@ -275,3 +284,20 @@ cases:
       omni: *default-omni
     expect:
       flux: []
+
+  # Omni's UI/API, kube-proxy, and machine API routes need the shared gateway.
+  - name: fails without the gateway enabled
+    values:
+      platform: metal
+      network: *default-network
+      cluster: *default-cluster
+      dns:
+        private_domain: cluster.local
+      identity:
+        enabled: true
+      provisioning:
+        enabled: true
+      gateway:
+        enabled: false
+      omni: *default-omni
+    expectError: true
