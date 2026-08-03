@@ -136,6 +136,23 @@ spec:
                       "attribute.nameformat": "Basic",
                       "full.path": "false"
                     }
+                  },
+                  # Omni's identity extraction (LocateUserInfo in
+                  # internal/backend/saml/session.go) ignores the SAML NameID
+                  # entirely except for Google's IdP — it requires an explicit
+                  # "email" attribute in the assertion, or every login fails with
+                  # "cannot find user identity in the assertion" despite the
+                  # nameIDFormat above.
+                  {
+                    name: "omni-email",
+                    protocol: "saml",
+                    protocolMapper: "saml-user-property-mapper",
+                    config: {
+                      "user.attribute": "email",
+                      "attribute.name": "email",
+                      "attribute.nameformat": "Basic",
+                      "friendly.name": "email"
+                    }
                   }
                 ]
               }' > /work/client.json
