@@ -156,7 +156,7 @@ flux:
         omni_wireguard_advertised_endpoint: "${omni_effective.wireguard_advertised_endpoint}"
         # The chart fetches this itself, server-side, so the internal (backchannel)
         # descriptor URL avoids depending on the gateway route being reachable.
-        keycloak_saml_metadata_url: "${identity_effective.backchannel_issuer}/protocol/saml/descriptor"
+        keycloak_saml_url: "${identity_effective.backchannel_issuer}/protocol/saml/descriptor"
         keycloak_realm: "${identity_effective.realm}"
         keycloak_admin_secret: "${(identity_effective.admin_password ?? '') != '' ? 'keycloak-bootstrap-admin' : 'keycloak-initial-admin'}"
         omni_saml_entity_id: "https://${omni_effective.hostname}${omni_effective.external_port_suffix}"

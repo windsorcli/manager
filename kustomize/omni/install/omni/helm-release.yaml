@@ -48,13 +48,16 @@ spec:
         # The chart defaults auth0 on; only one provider can be enabled at a time.
         auth0:
           enabled: false
-        # SAML client registered by the omni/saml-client Job. Metadata is fetched
-        # directly from Keycloak's public SAML descriptor, so no secret handoff is
-        # needed for this direction. attributeRules is a required field even when
-        # empty — labelRules alone isn't enough to satisfy the chart's schema.
+        # SAML client registered by the omni/saml-client Job. `url` — not
+        # `metadata`, despite its values.yaml description — is what Omni actually
+        # fetches live over HTTP (internal/backend/saml/saml.go: cfg.Metadata is
+        # read via os.ReadFile as a local path; only cfg.Url is HTTP-fetched). No
+        # secret handoff is needed for this direction. attributeRules is a
+        # required field even when empty — labelRules alone isn't enough to
+        # satisfy the chart's schema.
         saml:
           enabled: true
-          metadata: ${keycloak_saml_metadata_url}
+          url: ${keycloak_saml_url}
           nameIDFormat: email
           labelRules:
             saml.omni.sidero.dev/role: role
