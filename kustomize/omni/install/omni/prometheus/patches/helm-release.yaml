@@ -1,0 +1,12 @@
+# The chart leaves metrics off by default. Patched at /spec/values/metrics because
+# the base sets no metrics block; Helm merges this over the chart's own defaults.
+- op: add
+  path: /spec/values/metrics
+  value:
+    enabled: true
+    service:
+      type: ClusterIP
+      servicePort: 2122
+    serviceMonitor:
+      enabled: true
+      interval: 30s

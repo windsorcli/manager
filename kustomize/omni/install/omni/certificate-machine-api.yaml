@@ -1,0 +1,12 @@
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: omni-machine-api
+  namespace: omni
+spec:
+  secretName: omni-machine-api-tls
+  issuerRef:
+    name: public-acme
+    kind: ClusterIssuer
+  dnsNames:
+    - ${omni_machine_api_hostname}

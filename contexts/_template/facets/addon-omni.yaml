@@ -1,0 +1,81 @@
+kind: Facet
+apiVersion: blueprints.windsorcli.dev/v1alpha1
+metadata:
+  name: omni
+  description: Self-hosted Sidero Omni — the fleet's Talos control plane
+
+# provisioning.enabled fans identity on by default (config-provisioning.yaml), but an
+# operator's explicit opt-out survives that fan-out — Omni cannot run without an
+# identity provider to authenticate operators against, so it follows suit rather than
+# leaving a dangling dependsOn on identity-resources.
+when: provisioning.enabled == true && identity.enabled != false
+
+requires:
+  - paths:
+      - omni.etcd_encryption_key
+    message: Omni needs a GPG-armored private key to decrypt its etcd master key. Generate one with `(export GNUPGHOME=$(mktemp -d); gpg --batch --passphrase '' --quick-gen-key x; gpg -a --export-secret-key > omni.asc; rm -rf $GNUPGHOME)` and set omni.etcd_encryption_key via a secret() reference.
+
+config:
+  # One base hostname; the Kubernetes proxy and SideroLink machine API endpoints are
+  # subdomains of it, matching the chart's own example layout (omni.example.com,
+  # kubernetes.omni.example.com, siderolink.omni.example.com).
+  - name: omni_effective
+    value:
+      hostname: >-
+        ${omni.hostname
+          ?? ('omni.' + ((dns.public_domain ?? '') == ''
+                ? (dns.private_domain ?? dns.domain ?? '')
+                : dns.public_domain)
+              + (workstation.runtime == 'docker-desktop' ? ':8443' : ''))}
+      # NodePort where no cloud load balancer exists; LoadBalancer everywhere else —
+      # same split option-gateway.yaml uses for its own redirect port.
+      wireguard_service_type: "${omni.wireguard.service_type ?? (workstation.runtime == 'docker-desktop' ? 'NodePort' : 'LoadBalancer')}"
+
+# =============================================================================
+# Flux system — Omni
+# =============================================================================
+# pki-install issues the three TLS certificates Omni terminates itself; no gateway
+# route — SideroLink and Omni's gRPC/kube-proxy paths don't fit the shared HTTP(S)
+# gateway's model. identity-resources because Omni's SAML config points at the
+# platform realm's descriptor at startup, and the omni/saml-client Job registers Omni
+# as a client of that same realm over the admin REST API.
+#
+# Conditional components:
+#   - omni/prometheus: metrics Service and ServiceMonitor.
+#
+flux:
+
+  - name: omni
+    dependsOn:
+      - pki-install
+      - identity-resources
+    secrets:
+      omni-etcd-encryption-key:
+        data:
+          omni.asc: ${omni.etcd_encryption_key}
+    install:
+      components:
+        - omni
+        - omni/saml-client
+        - "${(telemetry.metrics.enabled ?? false) == true ? 'omni/prometheus' : ''}"
+      substitutions:
+        omni_hostname: "${omni_effective.hostname}"
+        omni_kube_proxy_hostname: "kubernetes.${omni_effective.hostname}"
+        omni_machine_api_hostname: "siderolink.${omni_effective.hostname}"
+        omni_persistence_size: "${omni.persistence_size ?? '16Gi'}"
+        omni_persistence_storage_class: "${cluster.storage.class ?? 'single'}"
+        # config.registries.imageFactoryBaseURL. Falls back to Manager's own image
+        # factory when it's enabled, else the chart's public default.
+        omni_image_factory_url: "${image_factory.external_url ?? (image_factory.enabled == true ? ('https://factory.' + ((dns.public_domain ?? '') == '' ? (dns.private_domain ?? dns.domain ?? '') : dns.public_domain) + (workstation.runtime == 'docker-desktop' ? ':8443' : '')) : 'https://factory.talos.dev')}"
+        omni_initial_admins: "${omni.initial_admins ?? []}"
+        omni_wireguard_service_type: "${omni_effective.wireguard_service_type}"
+        omni_wireguard_advertised_endpoint: "${omni.wireguard.advertised_endpoint ?? ''}"
+        # The chart fetches this itself, server-side, so the internal (backchannel)
+        # descriptor URL avoids depending on the gateway route being reachable.
+        keycloak_saml_metadata_url: "${identity_effective.backchannel_issuer}/protocol/saml/descriptor"
+        keycloak_realm: "${identity_effective.realm}"
+        keycloak_admin_secret: "${(identity_effective.admin_password ?? '') != '' ? 'keycloak-bootstrap-admin' : 'keycloak-initial-admin'}"
+        omni_saml_entity_id: "https://${omni_effective.hostname}"
+        omni_saml_acs_url: "https://${omni_effective.hostname}/saml/acs"
+      timeout: 10m
+      interval: 5m

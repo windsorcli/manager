@@ -1,0 +1,178 @@
+# addon-omni.yaml facet tests
+# Covers the enabled/disabled gate, the required etcd encryption key, hostname/image-factory
+# derivation, metrics, and the dependsOn chain onto pki-install and identity-resources.
+
+x-defaults:
+  network: &default-network
+    cidr_block: 10.5.0.0/16
+    loadbalancer_driver: kube-vip
+    loadbalancer_mode: arp
+    loadbalancer_ips:
+      start: "10.5.1.10"
+      end: "10.5.1.100"
+
+  cluster: &default-cluster
+    driver: talos
+    controlplanes:
+      nodes:
+        controlplane-1:
+          endpoint: 10.5.0.10:50000
+          node: 10.5.0.10
+          hostname: controlplane-1
+    workers:
+      volumes:
+        - /var/mnt/local
+
+  omni: &default-omni
+    etcd_encryption_key: |
+      -----BEGIN PGP PRIVATE KEY BLOCK-----
+      dGVzdC1rZXktbWF0ZXJpYWw=
+      -----END PGP PRIVATE KEY BLOCK-----
+
+cases:
+  # Baseline: provisioning on, no dns.public_domain — hostname derives from the private
+  # domain, image factory falls back to the public factory since it's off.
+  - name: installs omni with derived hostname and no image factory
+    values:
+      platform: metal
+      network: *default-network
+      cluster: *default-cluster
+      dns:
+        private_domain: cluster.local
+      identity:
+        enabled: true
+      # provisioning.enabled fans image_factory on by default (config-provisioning.yaml);
+      # opt out explicitly to exercise the public-factory fallback.
+      image_factory:
+        enabled: false
+      provisioning:
+        enabled: true
+      omni: *default-omni
+    expect:
+      flux:
+        - name: omni
+          dependsOn:
+            - pki-install
+            - identity-resources
+          install:
+            components:
+              - omni
+              - omni/saml-client
+            substitutions:
+              omni_hostname: omni.cluster.local
+              omni_kube_proxy_hostname: kubernetes.omni.cluster.local
+              omni_machine_api_hostname: siderolink.omni.cluster.local
+              omni_persistence_size: 16Gi
+              omni_image_factory_url: https://factory.talos.dev
+            timeout: 10m
+            interval: 5m
+
+  # Explicit hostname override and a self-hosted image factory both flow through.
+  - name: honors an explicit hostname and points at the self-hosted image factory
+    values:
+      platform: metal
+      network: *default-network
+      cluster: *default-cluster
+      dns:
+        private_domain: cluster.local
+      identity:
+        enabled: true
+      image_factory:
+        enabled: true
+        registry:
+          schematic:
+            registry: registry.example.com
+      provisioning:
+        enabled: true
+      omni:
+        <<: *default-omni
+        hostname: omni.fleet.example.com
+    expect:
+      flux:
+        - name: omni
+          install:
+            substitutions:
+              omni_hostname: omni.fleet.example.com
+              omni_kube_proxy_hostname: kubernetes.omni.fleet.example.com
+              omni_machine_api_hostname: siderolink.omni.fleet.example.com
+              omni_image_factory_url: https://factory.cluster.local
+
+  # telemetry.metrics.enabled adds the metrics component.
+  - name: adds the prometheus component when metrics are enabled
+    values:
+      platform: metal
+      network: *default-network
+      cluster: *default-cluster
+      dns:
+        private_domain: cluster.local
+      identity:
+        enabled: true
+      telemetry:
+        metrics:
+          enabled: true
+      provisioning:
+        enabled: true
+      omni: *default-omni
+    expect:
+      flux:
+        - name: omni
+          install:
+            components:
+              - omni
+              - omni/saml-client
+              - omni/prometheus
+
+  # Custom persistence size and wireguard advertised endpoint both flow through.
+  - name: honors persistence size and wireguard advertised endpoint overrides
+    values:
+      platform: metal
+      network: *default-network
+      cluster: *default-cluster
+      dns:
+        private_domain: cluster.local
+      identity:
+        enabled: true
+      provisioning:
+        enabled: true
+      omni:
+        <<: *default-omni
+        persistence_size: 32Gi
+        wireguard:
+          advertised_endpoint: 203.0.113.10:30180
+    expect:
+      flux:
+        - name: omni
+          install:
+            substitutions:
+              omni_persistence_size: 32Gi
+              omni_wireguard_advertised_endpoint: 203.0.113.10:30180
+
+  # Missing the GPG-armored etcd encryption key fails composition — Terraform cannot
+  # generate one (no provider does), so it is always operator-supplied.
+  - name: fails without an etcd encryption key
+    values:
+      platform: metal
+      network: *default-network
+      cluster: *default-cluster
+      dns:
+        private_domain: cluster.local
+      identity:
+        enabled: true
+      provisioning:
+        enabled: true
+    expectError: true
+
+  # provisioning.enabled fans identity and image_factory on by default (config-provisioning.yaml);
+  # omni itself stays off unless provisioning.enabled is true.
+  - name: excludes omni when provisioning is disabled
+    values:
+      platform: metal
+      network: *default-network
+      cluster: *default-cluster
+      dns:
+        private_domain: cluster.local
+      provisioning:
+        enabled: false
+      omni: *default-omni
+    expect:
+      flux: []

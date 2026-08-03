@@ -39,6 +39,8 @@ cases:
       gateway: *default-gateway
       provisioning:
         enabled: true
+      omni:
+        etcd_encryption_key: dummy-gpg-key
     expect:
       flux:
         - name: identity
@@ -69,6 +71,8 @@ cases:
       gateway: *default-gateway
       provisioning:
         enabled: true
+      omni:
+        etcd_encryption_key: dummy-gpg-key
       identity:
         enabled: false
     expect:
@@ -89,6 +93,8 @@ cases:
       gateway: *default-gateway
       provisioning:
         enabled: true
+      omni:
+        etcd_encryption_key: dummy-gpg-key
       image_factory:
         enabled: false
     expect:
