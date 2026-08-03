@@ -1,4 +1,4 @@
-# The keys/omni-account-id module generates Omni's config.account.id and holds it in
+# The ids/omni-account module generates Omni's config.account.id and holds it in
 # state. The chart refuses to install without it, and Omni's own docs require it stay
 # fixed for the lifetime of the installation, so the same UUID has to be returned on
 # every apply.

@@ -59,8 +59,8 @@ cases:
       omni: *default-omni
     expect:
       terraform:
-        - name: omni-account-id
-          path: keys/omni-account-id
+        - name: omni-account
+          path: ids/omni-account
       flux:
         - name: omni
           dependsOn:

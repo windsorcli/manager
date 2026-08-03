@@ -35,8 +35,8 @@ requires:
 # when the operator supplies no ID.
 terraform:
 
-  - name: omni-account-id
-    path: keys/omni-account-id
+  - name: omni-account
+    path: ids/omni-account
     when: (omni.account_id ?? '') == ''
 
 config:
@@ -140,7 +140,7 @@ flux:
         - omni/saml-client
         - "${(telemetry.metrics.enabled ?? false) == true ? 'omni/prometheus' : ''}"
       substitutions:
-        omni_account_id: "${omni.account_id ?? terraform_output('omni-account-id', 'id')}"
+        omni_account_id: "${omni.account_id ?? terraform_output('omni-account', 'id')}"
         omni_hostname: "${omni_effective.hostname}${omni_effective.external_port_suffix}"
         omni_kube_proxy_hostname: "${omni_effective.kube_proxy_hostname}${omni_effective.external_port_suffix}"
         omni_machine_api_hostname: "${omni_effective.machine_api_hostname}${omni_effective.external_port_suffix}"
