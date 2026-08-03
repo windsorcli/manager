@@ -147,8 +147,8 @@ cases:
               omni_persistence_size: 32Gi
               omni_wireguard_advertised_endpoint: 203.0.113.10:30180
 
-  # Missing the GPG-armored etcd encryption key fails composition — Terraform cannot
-  # generate one (no provider does), so it is always operator-supplied.
+  # Missing the GPG-armored etcd encryption key fails composition outside dev mode —
+  # Terraform cannot generate one (no provider does), so it is always operator-supplied.
   - name: fails without an etcd encryption key
     values:
       platform: metal
@@ -161,6 +161,28 @@ cases:
       provisioning:
         enabled: true
     expectError: true
+
+  # dev mode falls back to a fixed dev-only key, the same shape as Core's dev admin
+  # password — no key required from the operator.
+  - name: dev mode supplies a default etcd encryption key
+    values:
+      dev: true
+      platform: metal
+      network: *default-network
+      cluster: *default-cluster
+      dns:
+        private_domain: cluster.local
+      identity:
+        enabled: true
+      provisioning:
+        enabled: true
+    expect:
+      flux:
+        - name: omni
+          install:
+            components:
+              - omni
+              - omni/saml-client
 
   # provisioning.enabled fans identity and image_factory on by default (config-provisioning.yaml);
   # omni itself stays off unless provisioning.enabled is true.

@@ -11,7 +11,8 @@ metadata:
 when: provisioning.enabled == true && identity.enabled != false
 
 requires:
-  - paths:
+  - when: dev != true
+    paths:
       - omni.etcd_encryption_key
     message: Omni needs a GPG-armored private key to decrypt its etcd master key. Generate one with `(export GNUPGHOME=$(mktemp -d); gpg --batch --passphrase '' --quick-gen-key x; gpg -a --export-secret-key > omni.asc; rm -rf $GNUPGHOME)` and set omni.etcd_encryption_key via a secret() reference.
 
@@ -30,6 +31,35 @@ config:
       # NodePort where no cloud load balancer exists; LoadBalancer everywhere else —
       # same split option-gateway.yaml uses for its own redirect port.
       wireguard_service_type: "${omni.wireguard.service_type ?? (workstation.runtime == 'docker-desktop' ? 'NodePort' : 'LoadBalancer')}"
+
+  # Split from the block above so the dev-only key can be a plain literal rather
+  # than an expression string (the expression grammar has no escape for embedded
+  # newlines). Same shape as Core's dev-vs-supplied admin secret: an operator's own
+  # key always wins; the fixed key below only fills in under dev == true.
+  - name: omni_effective
+    when: (omni.etcd_encryption_key ?? '') != ''
+    value:
+      etcd_encryption_key: ${omni.etcd_encryption_key}
+
+  - name: omni_effective
+    when: (omni.etcd_encryption_key ?? '') == '' && dev == true
+    value:
+      etcd_encryption_key: |
+        -----BEGIN PGP PRIVATE KEY BLOCK-----
+
+        lFgEam/o7RYJKwYBBAHaRw8BAQdAvJ9sgNU/mNzzUURBYW6rkxtT4CG3gBGpE+eE
+        Zb2p0doAAQC6a3yRWocfjRbzoj0kbi1Kaf6J2RVYSJIeXIibogXNfw5RtBZvbW5p
+        LWRldkB3aW5kc29yLmxvY2FsiJkEExYKAEEWIQQCFqLg03r7RzBHWbarvUkg+WLH
+        RAUCam/o7QIbAwUJBaOagAULCQgHAgIiAgYVCgkICwIEFgIDAQIeBwIXgAAKCRCr
+        vUkg+WLHRNj1AP9fTur/3Cq1p201dcKiEKTK11f3f94RsM7OL/H5dqS+hAD/Wq85
+        8HRIUTCBxYuHUN/avZsqNrgKJp+kQ3Jn7zsacwCcXQRqb+jtEgorBgEEAZdVAQUB
+        AQdABe+v5DT6Lecck95BrSJPhgjTkvm+cusXbfcF5Sj4pzkDAQgHAAD/aD9EB6jX
+        l0czZpI3Z/4giLs+zY5F3fl1MVx3uXAJZugQJYh4BBgWCgAgFiEEAhai4NN6+0cw
+        R1m2q71JIPlix0QFAmpv6O0CGwwACgkQq71JIPlix0Tq9QEA/56y3LK4fPcMtSML
+        jyCiP+FVoAB7rXpg+V0ATF/PAQ4BAKf6DkIvk2L2r2u3x/F0ARkZZTnSwBX84lY2
+        /YJzgncL
+        =ujZb
+        -----END PGP PRIVATE KEY BLOCK-----
 
 # =============================================================================
 # Flux system — Omni
@@ -52,7 +82,7 @@ flux:
     secrets:
       omni-etcd-encryption-key:
         data:
-          omni.asc: ${omni.etcd_encryption_key}
+          omni.asc: ${omni_effective.etcd_encryption_key}
     install:
       components:
         - omni
