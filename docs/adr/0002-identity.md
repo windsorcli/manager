@@ -1,6 +1,6 @@
 ---
 title: "ADR-0002: Identity — where Core's Keycloak ends and the fleet's begins"
-description: "Core's `identity` capability (driver keycloak, promoted from the earlier `addons.keycloak` sketch) stands up the server (operator, Keycloak CR, Postgres backend, gateway route), a `platform` realm with a security baseline, an RBAC anchor, OIDC clients for the add-ons Core itself ships, and a consumer-extension contract (`identity_effective.{realm,issuer,backchannel_issuer}`) — all shipped, plus a `cluster.oidc` block that wires the kube-apiserver's own OIDC flags on Talos, falling back to the hosted issuer by default. This ADR draws the identity boundary the same way ADR-0001 drew the layering one: Core owns the server and the platform realm because a single cluster wants hardened SSO too, and Manager consumes Core's contract as just another blueprint — adding a Keycloak client (`KeycloakOIDCClient` or, where the consumer needs group-to-role mapping and OIDC doesn't have it yet — Omni first, see [ADR-0004](0004-omni.md) — `KeycloakSAMLClient`) only for the fleet-only services Core doesn't ship, and distributing the downstream-issuer trust. Manager reuses the platform realm rather than forking its own, which means it can add clients but nothing realm-level: operator kubectl auth, the fleet groups, and upstream IdP federation are all Core's by mechanism. With both Core dependencies now shipped, this cut still has no Manager resource to build — the ADR stands as the boundary record and implementation waits on ADR-0004 (Omni), the first fleet service Manager would client. Secrets are deferred to ADR-0003, and wiring the issuer into downstream machine config is deferred to ADR-0006."
+description: "Core's `identity` capability (driver keycloak, promoted from the earlier `addons.keycloak` sketch) stands up the server (operator, Keycloak CR, Postgres backend, gateway route), a `platform` realm with a security baseline, an RBAC anchor, OIDC clients for the add-ons Core itself ships, and a consumer-extension contract (`identity_effective.{realm,issuer,backchannel_issuer}`) — all shipped, plus a `cluster.oidc` block that wires the kube-apiserver's own OIDC flags on Talos, falling back to the hosted issuer by default. This ADR draws the identity boundary the same way ADR-0001 drew the layering one: Core owns the server and the platform realm because a single cluster wants hardened SSO too, and Manager consumes Core's contract as just another blueprint — registering a Keycloak client for the fleet-only services Core doesn't ship (Omni first, see [ADR-0004](0004-omni.md)) with an admin-API Job — the mechanism Core itself uses to read a generated client secret back out, adapted here to create the client too — not the unused `KeycloakOIDCClient`/`KeycloakSAMLClient` CRDs (Core deliberately never enables the preview feature those need — see Core's `identity` README, "Declarative clients") — and distributing the downstream-issuer trust. Manager reuses the platform realm rather than forking its own, which means it can add clients but nothing realm-level: operator kubectl auth, the fleet groups, and upstream IdP federation are all Core's by mechanism. With both Core dependencies now shipped, this cut still has no Manager resource to build — the ADR stands as the boundary record and implementation waits on ADR-0004 (Omni), the first fleet service Manager would client. Secrets are deferred to ADR-0003, and wiring the issuer into downstream machine config is deferred to ADR-0006."
 ---
 
 # ADR-0002: Identity — where Core's Keycloak ends and the fleet's begins
@@ -32,8 +32,9 @@ Both Core issues this ADR originally waited on have shipped:
 
 **What this means for this ADR:** every Core dependency named below has landed, but that does
 not unblock a Manager build. The only Manager-ownable resource this ADR identifies — a
-`KeycloakOIDCClient` for a fleet service Core does not ship — has no service to client until
-ADR-0004 (Omni) exists. The boundary this ADR draws is now fully live on Core's side; the
+client, registered via an admin-API Job, for a fleet service Core does not ship — has no
+service to client until ADR-0004 (Omni) exists. The boundary this ADR draws is now fully live
+on Core's side; the
 blocker moved from "Core hasn't built the realm" to "Manager has nothing of its own to attach
 to it yet." The Context and Decision sections below have been updated to describe what Core
 actually shipped (config keys, facet names, tense) rather than the PR 2 plan as originally
@@ -85,17 +86,25 @@ extends through the same CRDs.* Concretely, Core built:
 - a **kube-apiserver OIDC client** (`keycloak/realm/clients/kubernetes`), inferred on when
   `cluster.oidc.enabled == true` — this is the piece core#2286 tracks, described further down;
 - a **consumer-extension contract**: `identity_effective.{realm, issuer, backchannel_issuer,
-  admin_password}`, with the explicit expectation that *a consumer adds a
-  `KeycloakOIDCClient` in the platform realm (or a `KeycloakRealmImport` for its own realm)
-  from its own facet* — no Core change, no fork.
+  admin_password}`, with the explicit expectation that *a consumer registers a client in the
+  platform realm (or stands up its own `KeycloakRealmImport` for its own realm) from its own
+  facet* — no Core change, no fork. Core's own clients (Grafana, kubectl) are registered by
+  patching the platform `KeycloakRealmImport` Core owns and re-imports; a consumer outside
+  Core cannot safely patch that same document (it would either fork realm ownership or race
+  Core's own re-imports), so the contract for an *external* consumer is the same admin-API
+  Job pattern Core uses to read the generated secret back out — not a write into Core's realm
+  import. The `KeycloakOIDCClient`/`KeycloakSAMLClient` CRDs the operator vendors are not
+  this mechanism: Core deliberately never enables the preview `client-admin-api:v2` feature
+  (and the manually bootstrapped admin service account) those CRDs need — see Core's
+  `identity` README, "Declarative clients".
 
 This is correct under [ADR-0001](0001-layering-on-core.md) rule 1: a single cluster that
 wants hardened SSO for its own dashboards wants the *server, a hardened realm, and clients
 for the things Core ships* — so all of that is Core's. Core also settles, on its side, the
-client-secret handoff (the operator writes a generated client secret into a Kubernetes
-Secret; the consumer reads it via `valueFrom`) and names realm-import drift as a known
-limitation to revisit with keycloak-config-cli — both mechanisms Manager inherits rather
-than reinvents.
+client-secret handoff (the operator generates a client secret and a Job copies it into a
+Kubernetes Secret; the consumer reads it via `valueFrom`) and names realm-import drift as a
+known limitation to revisit with keycloak-config-cli — both mechanisms Manager inherits
+rather than reinvents.
 
 **What is left for the fleet is a short list — and it turns out to be shorter than it
 first looks.** A client for each fleet service Core does not ship (Omni first), and the
@@ -128,12 +137,13 @@ Operators and management services live in the one realm Core already hardens
 (`identity.keycloak.realm`, default `platform`). What Manager adds to that realm is a Keycloak
 client per **fleet service Core does not ship** — Omni (ADR-0004) is the first; later a fleet
 dashboard or fleet API is the same shape. Group membership drives role, and the
-group-claim-to-RBAC mapping is the contract every consumer reads — which client CRD gets that
-mapping is a per-consumer choice: Omni's OIDC provider has no group-claim mapping yet, so
-[ADR-0004](0004-omni.md) uses `KeycloakSAMLClient` for it instead, with `KeycloakOIDCClient`
-as the default for anything that supports OIDC claim mapping natively (Core's own add-on
-clients all do). One realm keeps operator identity in one place and inherits Core's security
-baseline for free.
+group-claim-to-RBAC mapping is the contract every consumer reads — which client *protocol*
+gets that mapping is a per-consumer choice: Omni's OIDC provider has no group-claim mapping
+yet, so [ADR-0004](0004-omni.md) registers a SAML client for it instead, with OIDC as the
+default for anything that supports claim mapping natively (Core's own add-on clients all do).
+Both are registered the same way — decision 3's admin-API Job — so the protocol choice is
+per-consumer, but the registration mechanism is not. One realm keeps operator identity in one
+place and inherits Core's security baseline for free.
 
 Two things that look like they belong here do not. **Operator `kubectl` auth is Core's, not
 Manager's** — the `kubectl`/`kubelogin` OIDC client is realm-level infrastructure a single
@@ -148,20 +158,28 @@ isolation boundary actually exists, Manager stands up its own realm through the 
 `KeycloakRealmImport` path Core's contract already invites — this decision is revisited, not
 worked around. There is one tenant today, so there is one realm.
 
-**3. Manager's clients bootstrap declaratively through the operator's `KeycloakOIDCClient`,
-not Terraform — for the first cut.** The operator and its client CRDs are already present, so
-a client is just another CR reconciled under Flux, in the same GitOps path as everything
-else, with no admin credential needed at plan time and no "Keycloak must be reachable before
-Terraform can configure it" ordering problem during `windsor up`. Manager inherits Core's
-client-secret handoff wholesale: the operator writes the generated client secret into a
-Kubernetes Secret, and the consumer reads it via `valueFrom`. Its cost is the same one Core
-names for the realm — the operator reconciles a client on create but does not fully manage
-drift on every field afterward — and it is acceptable for clients whose shape changes rarely.
-**The Terraform Keycloak provider is the named successor**: when per-client lifecycle
-management, rotation, or drift detection becomes the actual problem, fleet identity moves to a
-Terraform module Windsor already knows how to compose, and this decision is revisited — not
-worked around. Core and Manager move together here, because the drift limitation is one they
-share.
+**3. Manager's clients bootstrap declaratively through an admin-API Job — the same mechanism
+Core uses for its own add-on clients — not Terraform, and not the operator's
+`KeycloakOIDCClient`/`KeycloakSAMLClient` CRDs.** Those CRDs need the preview
+`client-admin-api:v2` feature plus a manually bootstrapped admin service account, which Core
+deliberately never enables (Core's `identity` README, "Declarative clients"), so they reconcile
+nothing in this cluster. Core's own clients are patched into the platform `KeycloakRealmImport`
+it owns and re-imports; Manager cannot patch fleet clients into that same document without
+either forking realm ownership or racing Core's own re-imports. Instead, a Job gated on
+`identity-resources` authenticates to Keycloak's admin REST API with the bootstrap admin
+credential — the same staged-in-memory-volume pattern Core's own secret-copy Job already
+uses — creates the client (and, for SAML, its group-to-attribute protocol mappers) if it does
+not already exist, then writes the generated secret into a Kubernetes Secret the consumer
+reads via `valueFrom`. This is still a plain object reconciled under Flux in the same GitOps
+path as everything else — the correction is the object type (a Job hitting the admin API, not
+a CR) and that an admin credential *is* needed at apply time, not the deployment model. Its
+cost is the same one Core names for its own realm import: the Job creates the client once and
+does not manage drift on fields changed by hand afterward, acceptable for a client whose shape
+changes rarely. **The Terraform Keycloak provider is the named successor**: when per-client
+lifecycle management, rotation, or drift detection becomes the actual problem, fleet identity
+moves to a Terraform module Windsor already knows how to compose, and this decision is
+revisited — not worked around. Core and Manager move together here, because the drift
+limitation is one they share.
 
 **4. The issuer is the public gateway hostname Core already publishes, served under a
 publicly-trusted certificate.** Downstream API servers set
@@ -190,14 +208,14 @@ configuration), reads `identity.keycloak.realm` (or `identity_effective.realm`) 
 contract rather than redefining it, and never redeclares `identity`.
 
 **7. Reusing the realm means Manager can only add client-shaped resources; everything
-realm-level is Core's, by mechanism as well as by layer.** The operator's CRDs split cleanly:
-`KeycloakOIDCClient` and `KeycloakSAMLClient` are standalone CRs a consumer can add to an
-existing realm, but a realm's groups, its upstream identity-provider federation, its users,
-and its custom flows all live *inside* the single `KeycloakRealmImport` — and that import is
-Core's. So decision 2's "reuse the platform realm" carries a hard consequence: Manager can
-add fleet **clients**, and nothing else. It cannot author a fleet operator group, broker the
-realm to a corporate IdP, or seed users, because there is no CR for those separate from the
-realm Core owns.
+realm-level is Core's, by mechanism as well as by layer.** Decision 3's admin-API Job creates
+exactly one object — a client scoped to a `clientId` Manager owns — and touches nothing else
+in the realm. A realm's groups, its upstream identity-provider federation, its users, and its
+custom flows all live *inside* the single `KeycloakRealmImport` document, and that document is
+Core's: Manager's Job has no path to reach into it, patch it, or race its re-imports. So
+decision 2's "reuse the platform realm" carries a hard consequence: Manager can add fleet
+**clients**, and nothing else. It cannot author a fleet operator group, broker the realm to a
+corporate IdP, or seed users, because none of those exist outside the realm import Core owns.
 
 This surfaces a contradiction in Core's plan worth naming: Core lists *upstream federation*
 and *users* as **consumer-owned**, yet the mechanism it ships — one Core-owned realm import —
@@ -217,10 +235,10 @@ ADR-0004 (Omni, which authenticates against this realm) build on that contract.
 ## Consequences
 
 - Manager's identity footprint is far smaller than a first reading of "the fleet's identity
-  provider" suggests: it turns Core's server on and adds a `KeycloakOIDCClient` per fleet
-  service Core does not ship. The realm, its baseline, the RBAC anchor, the `kubectl` client,
-  every core-add-on client, and everything else realm-level are Core's. Most of Keycloak —
-  including most of the identity — is Core's.
+  provider" suggests: it turns Core's server on and registers, via an admin-API Job, one
+  client per fleet service Core does not ship. The realm, its baseline, the RBAC anchor, the
+  `kubectl` client, every core-add-on client, and everything else realm-level are Core's. Most
+  of Keycloak — including most of the identity — is Core's.
 - **This cut still builds nothing, but the reason has changed.** Once `kubectl` moved to Core
   (decision 2) and everything realm-level was found to be structurally Core's (decision 7),
   the only Manager-ownable resource left is a client for a fleet service Core does not ship —
@@ -236,11 +254,11 @@ ADR-0004 (Omni, which authenticates against this realm) build on that contract.
   sketch this ADR originally cited), and the exposed `identity_effective.issuer` are all
   shipped. Manager's clients have a real realm to attach to; nothing about identity blocks a
   future Manager facet from Core's side anymore.
-- The operator's reconcile-on-create-only limitation is a known, bounded debt that Core and
-  Manager share — Core for the realm, Manager for its clients. It buys a working GitOps-native
-  bootstrap now; it will not manage identity whose shape churns. Decision 3 names the exit
-  (Terraform), and Core names the same one (keycloak-config-cli), so this does not become a
-  silent trap on either side.
+- The create-once, no-drift-management limitation is a known, bounded debt that Core and
+  Manager share — Core for its realm import, Manager for its client-registration Jobs. It buys
+  a working GitOps-native bootstrap now; it will not manage identity whose shape churns.
+  Decision 3 names the exit (Terraform), and Core names the same one (keycloak-config-cli), so
+  this does not become a silent trap on either side.
 - Reusing the platform realm couples the fleet's operator identity to Core's realm hardening:
   Manager gets `sslRequired`, brute-force detection, and token-lifetime defaults for free, but
   also inherits them — a fleet that needed a materially different realm posture would be the
