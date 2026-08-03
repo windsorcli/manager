@@ -257,6 +257,10 @@ cases:
             components:
               - omni
               - omni/saml-client
+            substitutions:
+              # Core's own dev admin (keycloak/realm/dev-user), so a SAML login
+              # with that identity is recognized immediately.
+              omni_initial_admins: "[admin@local.test]"
 
   # docker-desktop defaults SideroLink to NodePort, so the advertised endpoint derives
   # from the first control-plane's own node IP and the chart's default NodePort — no

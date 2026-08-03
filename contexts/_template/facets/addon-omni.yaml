@@ -155,9 +155,11 @@ flux:
         # factory that isn't in this cluster). Falls back to the chart's public
         # default when the factory isn't enabled at all.
         omni_image_factory_url: "${image_factory.external_url ?? (image_factory.enabled == true ? 'http://image-factory.image-factory.svc.cluster.local:8080' : 'https://factory.talos.dev')}"
-        # The chart refuses to start with zero initial users. dev mode seeds one
-        # fixed placeholder, the same shape as the etcd key default above.
-        omni_initial_admins: "${omni.initial_admins ?? (dev == true ? ['admin@windsor.local'] : [])}"
+        # The chart refuses to start with zero initial users. dev mode seeds
+        # Core's own dev admin (keycloak/realm/dev-user), so a SAML login with
+        # that same identity is recognized immediately — not a separate,
+        # unrelated placeholder identity.
+        omni_initial_admins: "${omni.initial_admins ?? (dev == true ? ['admin@local.test'] : [])}"
         omni_wireguard_service_type: "${omni_effective.wireguard_service_type}"
         omni_wireguard_advertised_endpoint: "${omni_effective.wireguard_advertised_endpoint}"
         # The chart fetches this itself, server-side, so the internal (backchannel)
