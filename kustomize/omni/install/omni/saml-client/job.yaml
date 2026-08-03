@@ -80,7 +80,6 @@ spec:
               umask 077
               KC="http://keycloak-service.system-identity:8080"
               REALM="${keycloak_realm}"
-              CLIENT_ID="omni"
               ENTITY_ID="${omni_saml_entity_id}"
               ACS_URL="${omni_saml_acs_url}"
               # secretKeyRef only resolves same-namespace; the admin secret lives in
@@ -105,8 +104,12 @@ spec:
                 sleep 5
               done
               printf 'Authorization: Bearer %s' "$${token}" > /work/hdr
-              cid=$(curl -sf --connect-timeout 5 --max-time 15 -H @/work/hdr \
-                "$${KC}/admin/realms/$${REALM}/clients?clientId=$${CLIENT_ID}" \
+              # clientId is the SP's real entity ID (a full URL), so it must be
+              # query-string encoded — the client is created under this same
+              # value below, not a bare name.
+              cid=$(curl -sf --connect-timeout 5 --max-time 15 -H @/work/hdr -G \
+                --data-urlencode "clientId=$${ENTITY_ID}" \
+                "$${KC}/admin/realms/$${REALM}/clients" \
                 | jq -r '.[0].id // empty')
               if [ -n "$${cid}" ]; then
                 echo "omni saml client already registered ($${cid})"
@@ -136,10 +139,16 @@ spec:
                   }
                 ]
               }' > /work/client.json
-              curl -sf --connect-timeout 5 --max-time 15 -H @/work/hdr \
+              http_code=$(curl -s -o /work/create-response -w '%{http_code}' \
+                --connect-timeout 5 --max-time 15 -H @/work/hdr \
                 -H "Content-Type: application/json" \
                 -d @/work/client.json \
-                "$${KC}/admin/realms/$${REALM}/clients"
+                "$${KC}/admin/realms/$${REALM}/clients")
+              if [ "$${http_code}" -lt 200 ] || [ "$${http_code}" -ge 300 ]; then
+                echo "failed to create omni saml client (HTTP $${http_code}):" >&2
+                cat /work/create-response >&2
+                exit 1
+              fi
               echo "registered omni saml client"
           resources:
             requests:
