@@ -6,7 +6,7 @@ metadata:
 spec:
   secretName: omni-machine-api-tls
   issuerRef:
-    name: public-acme
+    name: ${omni_cert_issuer}
     kind: ClusterIssuer
   dnsNames:
     - ${omni_machine_api_hostname}

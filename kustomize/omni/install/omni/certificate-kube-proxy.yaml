@@ -6,7 +6,7 @@ metadata:
 spec:
   secretName: omni-kube-proxy-tls
   issuerRef:
-    name: public-acme
+    name: ${omni_cert_issuer}
     kind: ClusterIssuer
   dnsNames:
     - ${omni_kube_proxy_hostname}

@@ -64,6 +64,7 @@ flux:
         omni_machine_api_hostname: "siderolink.${omni_effective.hostname}"
         omni_persistence_size: "${omni.persistence_size ?? '16Gi'}"
         omni_persistence_storage_class: "${cluster.storage.class ?? 'single'}"
+        omni_cert_issuer: "${cert_effective.public_issuer}"
         # config.registries.imageFactoryBaseURL. Falls back to Manager's own image
         # factory when it's enabled, else the chart's public default.
         omni_image_factory_url: "${image_factory.external_url ?? (image_factory.enabled == true ? ('https://factory.' + ((dns.public_domain ?? '') == '' ? (dns.private_domain ?? dns.domain ?? '') : dns.public_domain) + (workstation.runtime == 'docker-desktop' ? ':8443' : '')) : 'https://factory.talos.dev')}"
