@@ -118,8 +118,8 @@ spec:
                 enabled: true,
                 redirectUris: [$acs_url],
                 attributes: {
-                  saml_assertion_signature: "true",
-                  saml_client_signature: "false",
+                  "saml.assertion.signature": "true",
+                  "saml.client.signature": "false",
                   saml_force_name_id_format: "true",
                   saml_name_id_format: "email"
                 },
