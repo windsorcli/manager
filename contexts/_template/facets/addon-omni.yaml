@@ -146,9 +146,15 @@ flux:
         omni_machine_api_hostname: "${omni_effective.machine_api_hostname}${omni_effective.external_port_suffix}"
         omni_persistence_size: "${omni.persistence_size ?? '16Gi'}"
         omni_persistence_storage_class: "${cluster.storage.class ?? 'single'}"
-        # config.registries.imageFactoryBaseURL. Falls back to Manager's own image
-        # factory when it's enabled, else the chart's public default.
-        omni_image_factory_url: "${image_factory.external_url ?? (image_factory.enabled == true ? ('https://factory.' + omni_effective.domain + omni_effective.external_port_suffix) : 'https://factory.talos.dev')}"
+        # config.registries.imageFactoryBaseURL. Omni and the image factory run in
+        # the same cluster, so the default points at the factory's own internal
+        # Service — the cluster's own CoreDNS has no route for the external
+        # gateway hostname (that's a host-only resolver entry), and hairpinning
+        # out through the gateway just to come back in is unnecessary. An
+        # operator's explicit external_url is still honored as-is (e.g. a
+        # factory that isn't in this cluster). Falls back to the chart's public
+        # default when the factory isn't enabled at all.
+        omni_image_factory_url: "${image_factory.external_url ?? (image_factory.enabled == true ? 'http://image-factory.image-factory.svc.cluster.local:8080' : 'https://factory.talos.dev')}"
         # The chart refuses to start with zero initial users. dev mode seeds one
         # fixed placeholder, the same shape as the etcd key default above.
         omni_initial_admins: "${omni.initial_admins ?? (dev == true ? ['admin@windsor.local'] : [])}"

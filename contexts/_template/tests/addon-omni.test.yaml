@@ -85,6 +85,33 @@ cases:
               substitutions:
                 external_domain: cluster.local
 
+  # An operator's explicit external_url always wins over the in-cluster default —
+  # e.g. a factory that isn't running in this cluster at all.
+  - name: honors an explicit image factory external_url override
+    values:
+      platform: metal
+      network: *default-network
+      cluster: *default-cluster
+      dns:
+        private_domain: cluster.local
+      identity:
+        enabled: true
+      image_factory:
+        enabled: true
+        external_url: https://factory.example.com
+        registry:
+          schematic:
+            registry: registry.example.com
+      provisioning:
+        enabled: true
+      omni: *default-omni
+    expect:
+      flux:
+        - name: omni
+          install:
+            substitutions:
+              omni_image_factory_url: https://factory.example.com
+
   # Operator-supplied account ID: the terraform module is skipped entirely.
   - name: skips the account id module when an id is supplied
     values:
@@ -139,7 +166,7 @@ cases:
               omni_hostname: omni.fleet.example.com
               omni_kube_proxy_hostname: omni-kube.cluster.local
               omni_machine_api_hostname: omni-siderolink.cluster.local
-              omni_image_factory_url: https://factory.cluster.local
+              omni_image_factory_url: http://image-factory.image-factory.svc.cluster.local:8080
 
   # telemetry.metrics.enabled adds the metrics component.
   - name: adds the prometheus component when metrics are enabled
