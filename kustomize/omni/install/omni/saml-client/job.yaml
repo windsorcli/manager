@@ -115,6 +115,11 @@ spec:
                 echo "omni saml client already registered ($${cid})"
                 exit 0
               fi
+              # Omni's identity extraction (LocateUserInfo in
+              # internal/backend/saml/session.go) ignores the SAML NameID
+              # entirely except for Google's IdP, so the omni-email mapper below
+              # is required: without it every login fails with "cannot find
+              # user identity in the assertion" despite the nameIDFormat above.
               jq -n --arg entity_id "$${ENTITY_ID}" --arg acs_url "$${ACS_URL}" '{
                 clientId: $entity_id,
                 protocol: "saml",
@@ -137,12 +142,6 @@ spec:
                       "full.path": "false"
                     }
                   },
-                  # Omni's identity extraction (LocateUserInfo in
-                  # internal/backend/saml/session.go) ignores the SAML NameID
-                  # entirely except for Google's IdP — it requires an explicit
-                  # "email" attribute in the assertion, or every login fails with
-                  # "cannot find user identity in the assertion" despite the
-                  # nameIDFormat above.
                   {
                     name: "omni-email",
                     protocol: "saml",
