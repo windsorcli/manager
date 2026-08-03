@@ -43,6 +43,8 @@ cases:
         etcd_encryption_key: dummy-gpg-key
         wireguard:
           advertised_endpoint: 203.0.113.10:50180
+        initial_admins:
+          - admin@example.com
     expect:
       flux:
         - name: identity
@@ -77,6 +79,8 @@ cases:
         etcd_encryption_key: dummy-gpg-key
         wireguard:
           advertised_endpoint: 203.0.113.10:50180
+        initial_admins:
+          - admin@example.com
       identity:
         enabled: false
     expect:
@@ -101,6 +105,8 @@ cases:
         etcd_encryption_key: dummy-gpg-key
         wireguard:
           advertised_endpoint: 203.0.113.10:50180
+        initial_admins:
+          - admin@example.com
       image_factory:
         enabled: false
     expect:

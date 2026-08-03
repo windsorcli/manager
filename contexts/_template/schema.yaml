@@ -153,7 +153,7 @@ properties:
         items:
           type: string
         default: []
-        description: Emails seeded as admins on Omni's first start (config.auth.initialUsers), before Keycloak SAML group membership grants any role. Bootstrap only, not how production access is granted.
+        description: Emails seeded as admins on Omni's first start (config.auth.initialUsers), before Keycloak SAML group membership grants any role. Bootstrap only, not how production access is granted. The chart refuses to start with none at all — required outside dev mode; dev mode seeds a fixed placeholder.
     additionalProperties: false
     description: Self-hosted Sidero Omni fleet control plane
 

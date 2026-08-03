@@ -19,6 +19,10 @@ requires:
     paths:
       - omni.wireguard.advertised_endpoint
     message: SideroLink's advertised endpoint can't be derived for a LoadBalancer Service — its external IP doesn't exist until the Service is created. Apply once, then set omni.wireguard.advertised_endpoint to <load-balancer-ip>:50180 and apply again.
+  - when: dev != true
+    paths:
+      - omni.initial_admins
+    message: Omni requires at least one bootstrap admin email in config.auth.initialUsers before it will start. Set omni.initial_admins to a list of operator emails — real access should route through Keycloak SAML group membership once it's set up.
 
 # =============================================================================
 # Terraform — account ID
@@ -132,7 +136,9 @@ flux:
         # config.registries.imageFactoryBaseURL. Falls back to Manager's own image
         # factory when it's enabled, else the chart's public default.
         omni_image_factory_url: "${image_factory.external_url ?? (image_factory.enabled == true ? ('https://factory.' + ((dns.public_domain ?? '') == '' ? (dns.private_domain ?? dns.domain ?? '') : dns.public_domain) + (workstation.runtime == 'docker-desktop' ? ':8443' : '')) : 'https://factory.talos.dev')}"
-        omni_initial_admins: "${omni.initial_admins ?? []}"
+        # The chart refuses to start with zero initial users. dev mode seeds one
+        # fixed placeholder, the same shape as the etcd key default above.
+        omni_initial_admins: "${omni.initial_admins ?? (dev == true ? ['admin@windsor.local'] : [])}"
         omni_wireguard_service_type: "${omni_effective.wireguard_service_type}"
         omni_wireguard_advertised_endpoint: "${omni_effective.wireguard_advertised_endpoint}"
         # The chart fetches this itself, server-side, so the internal (backchannel)

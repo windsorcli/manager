@@ -33,6 +33,10 @@ x-defaults:
     # cases not specifically exercising that derivation supply the override directly.
     wireguard:
       advertised_endpoint: 203.0.113.10:50180
+    # The chart refuses to start with zero initial users; cases not specifically
+    # exercising that requirement supply one directly.
+    initial_admins:
+      - admin@example.com
 
 cases:
   # Baseline: provisioning on, no dns.public_domain — hostname derives from the private
@@ -239,6 +243,8 @@ cases:
           -----BEGIN PGP PRIVATE KEY BLOCK-----
           dGVzdC1rZXktbWF0ZXJpYWw=
           -----END PGP PRIVATE KEY BLOCK-----
+        initial_admins:
+          - admin@example.com
     terraformOutputs:
       compute:
         controlplanes:
