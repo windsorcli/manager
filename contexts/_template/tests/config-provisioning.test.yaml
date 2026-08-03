@@ -41,6 +41,8 @@ cases:
         enabled: true
       omni:
         etcd_encryption_key: dummy-gpg-key
+        wireguard:
+          advertised_endpoint: 203.0.113.10:50180
     expect:
       flux:
         - name: identity
@@ -73,6 +75,8 @@ cases:
         enabled: true
       omni:
         etcd_encryption_key: dummy-gpg-key
+        wireguard:
+          advertised_endpoint: 203.0.113.10:50180
       identity:
         enabled: false
     expect:
@@ -95,6 +99,8 @@ cases:
         enabled: true
       omni:
         etcd_encryption_key: dummy-gpg-key
+        wireguard:
+          advertised_endpoint: 203.0.113.10:50180
       image_factory:
         enabled: false
     expect:

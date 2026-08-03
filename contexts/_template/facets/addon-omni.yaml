@@ -15,6 +15,10 @@ requires:
     paths:
       - omni.etcd_encryption_key
     message: Omni needs a GPG-armored private key to decrypt its etcd master key. Generate one with `(export GNUPGHOME=$(mktemp -d); gpg --batch --passphrase '' --quick-gen-key x; gpg -a --export-secret-key > omni.asc; rm -rf $GNUPGHOME)` and set omni.etcd_encryption_key via a secret() reference.
+  - when: (omni_effective.wireguard_advertised_endpoint ?? '') == ''
+    paths:
+      - omni.wireguard.advertised_endpoint
+    message: SideroLink's advertised endpoint can't be derived for a LoadBalancer Service — its external IP doesn't exist until the Service is created. Apply once, then set omni.wireguard.advertised_endpoint to <load-balancer-ip>:50180 and apply again.
 
 # =============================================================================
 # Terraform — account ID
@@ -43,6 +47,23 @@ config:
       # NodePort where no cloud load balancer exists; LoadBalancer everywhere else —
       # same split option-gateway.yaml uses for its own redirect port.
       wireguard_service_type: "${omni.wireguard.service_type ?? (workstation.runtime == 'docker-desktop' ? 'NodePort' : 'LoadBalancer')}"
+      # NodePort topologies can derive host:port from the first control-plane node's
+      # own address — terraform_output("compute", "controlplanes") where a compute
+      # module provisions it, else cluster.controlplanes.nodes directly (metal has no
+      # compute module; nodes are operator-supplied), the same fallback chain
+      # platform-docker.yaml uses for its own controlplanes value — plus the chart's
+      # default NodePort. A LoadBalancer's external IP doesn't exist until the Service
+      # is created, so that topology has no derived default — the operator sets
+      # omni.wireguard.advertised_endpoint once it's known.
+      wireguard_advertised_endpoint: >-
+        ${omni.wireguard.advertised_endpoint
+          ?? ((omni.wireguard.service_type ?? (workstation.runtime == 'docker-desktop' ? 'NodePort' : 'LoadBalancer')) == 'NodePort'
+              ? (len(terraform_output('compute', 'controlplanes') ?? []) > 0
+                  ? (split(terraform_output('compute', 'controlplanes')[0].endpoint, ':')[0] + ':30180')
+                  : (len(values(cluster.controlplanes.nodes ?? {})) > 0
+                      ? (split(values(cluster.controlplanes.nodes)[0].endpoint, ':')[0] + ':30180')
+                      : ''))
+              : '')}
 
   # Split from the block above so the dev-only key can be a plain literal rather
   # than an expression string (the expression grammar has no escape for embedded
@@ -113,7 +134,7 @@ flux:
         omni_image_factory_url: "${image_factory.external_url ?? (image_factory.enabled == true ? ('https://factory.' + ((dns.public_domain ?? '') == '' ? (dns.private_domain ?? dns.domain ?? '') : dns.public_domain) + (workstation.runtime == 'docker-desktop' ? ':8443' : '')) : 'https://factory.talos.dev')}"
         omni_initial_admins: "${omni.initial_admins ?? []}"
         omni_wireguard_service_type: "${omni_effective.wireguard_service_type}"
-        omni_wireguard_advertised_endpoint: "${omni.wireguard.advertised_endpoint ?? ''}"
+        omni_wireguard_advertised_endpoint: "${omni_effective.wireguard_advertised_endpoint}"
         # The chart fetches this itself, server-side, so the internal (backchannel)
         # descriptor URL avoids depending on the gateway route being reachable.
         keycloak_saml_metadata_url: "${identity_effective.backchannel_issuer}/protocol/saml/descriptor"

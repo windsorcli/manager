@@ -28,6 +28,11 @@ x-defaults:
       -----BEGIN PGP PRIVATE KEY BLOCK-----
       dGVzdC1rZXktbWF0ZXJpYWw=
       -----END PGP PRIVATE KEY BLOCK-----
+    # metal defaults SideroLink to a LoadBalancer Service (network.loadbalancer_driver:
+    # kube-vip below); its external IP doesn't exist until the Service is created, so
+    # cases not specifically exercising that derivation supply the override directly.
+    wireguard:
+      advertised_endpoint: 203.0.113.10:50180
 
 cases:
   # Baseline: provisioning on, no dns.public_domain — hostname derives from the private
@@ -202,6 +207,9 @@ cases:
         enabled: true
       provisioning:
         enabled: true
+      omni:
+        wireguard:
+          advertised_endpoint: 203.0.113.10:50180
     expect:
       flux:
         - name: omni
@@ -209,6 +217,43 @@ cases:
             components:
               - omni
               - omni/saml-client
+
+  # docker-desktop defaults SideroLink to NodePort, so the advertised endpoint derives
+  # from the first control-plane's own node IP and the chart's default NodePort — no
+  # operator override needed.
+  - name: derives the wireguard endpoint on docker-desktop from the control-plane node
+    values:
+      platform: docker
+      network: *default-network
+      cluster: *default-cluster
+      dns:
+        private_domain: cluster.local
+      identity:
+        enabled: true
+      provisioning:
+        enabled: true
+      workstation:
+        runtime: docker-desktop
+      omni:
+        etcd_encryption_key: |
+          -----BEGIN PGP PRIVATE KEY BLOCK-----
+          dGVzdC1rZXktbWF0ZXJpYWw=
+          -----END PGP PRIVATE KEY BLOCK-----
+    terraformOutputs:
+      compute:
+        controlplanes:
+          - endpoint: 10.5.0.10:6443
+            node: 10.5.0.10
+            hostname: controlplane-1
+        workers: []
+      workstation: {}
+    expect:
+      flux:
+        - name: omni
+          install:
+            substitutions:
+              omni_wireguard_service_type: NodePort
+              omni_wireguard_advertised_endpoint: 10.5.0.10:30180
 
   # provisioning.enabled fans identity and image_factory on by default (config-provisioning.yaml);
   # omni itself stays off unless provisioning.enabled is true.
