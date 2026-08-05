@@ -75,7 +75,6 @@ cases:
               omni_machine_api_hostname: omni-siderolink.cluster.local
               omni_persistence_size: 16Gi
               omni_image_factory_url: https://factory.talos.dev
-              omni_image_factory_host: ""
             timeout: 10m
             interval: 5m
           resources:
@@ -112,7 +111,6 @@ cases:
           install:
             substitutions:
               omni_image_factory_url: https://factory.example.com
-              omni_image_factory_host: ""
 
   # Operator-supplied account ID: the terraform module is skipped entirely.
   - name: skips the account id module when an id is supplied
@@ -169,7 +167,6 @@ cases:
               omni_kube_proxy_hostname: omni-kube.cluster.local
               omni_machine_api_hostname: omni-siderolink.cluster.local
               omni_image_factory_url: https://factory.cluster.local
-              omni_image_factory_host: factory.cluster.local
 
   # telemetry.metrics.enabled adds the metrics component.
   - name: adds the prometheus component when metrics are enabled

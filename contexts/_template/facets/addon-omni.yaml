@@ -153,14 +153,6 @@ flux:
         # URL, not the in-cluster Service. Falls back to Manager's own image
         # factory when it's enabled, else the chart's public default.
         omni_image_factory_url: "${image_factory.external_url ?? (image_factory.enabled == true ? ('https://factory.' + omni_effective.domain + omni_effective.external_port_suffix) : 'https://factory.talos.dev')}"
-        # windsorcli/core#2406: on docker-desktop, in-cluster DNS for this same
-        # hostname resolves to 127.0.0.1 (meant for the host's own port-forwarded
-        # loopback), so Omni's own server-side calls to its self-hosted factory
-        # get connection refused. Empty when the factory is external/disabled —
-        # nothing to alias to. install/omni/helm-release.yaml resolves this to
-        # the factory Service's ClusterIP at pod startup and injects it into
-        # /etc/hosts, bypassing the broken DNS chain entirely for this one call.
-        omni_image_factory_host: "${(image_factory.external_url ?? '') == '' && image_factory.enabled == true ? ('factory.' + omni_effective.domain) : ''}"
         # The chart refuses to start with zero initial users. dev mode seeds
         # Core's own dev admin (keycloak/realm/dev-user), so a SAML login with
         # that same identity is recognized immediately — not a separate,
