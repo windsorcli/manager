@@ -27,6 +27,13 @@ spec:
     fullnameOverride: omni
     # Single replica: embedded etcd does not support multiple active writers.
     replicaCount: 1
+    # Omni's own server-side calls (e.g. to its self-hosted image factory) verify
+    # TLS against the gateway's private-CA-signed certificate. The namespace is
+    # already labeled for trust-manager's Bundle projection (install/namespace.yaml),
+    # but Kyverno's inject-private-ca policy matches on the pod's own label, not
+    # the namespace's — this is what actually triggers the CA bundle mount.
+    podLabels:
+      use-custom-ca: "true"
     config:
       account:
         id: ${omni_account_id}
