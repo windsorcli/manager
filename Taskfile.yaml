@@ -99,6 +99,15 @@ tasks:
     cmds:
       - windsor test
 
+  test:omni:
+    desc: |
+      Boot a local QEMU Talos VM and register it with the local Omni instance over
+      SideroLink (see tests/omni/README.md). Not part of `task test` - needs sudo, a
+      manually-downloaded Omni join config, and macOS/Docker Desktop.
+      Pass --clean to tear down a previous run: task test:omni -- --clean
+    cmds:
+      - tests/omni/register-machine.sh {{.CLI_ARGS}}
+
   fmt:
     desc: Check Terraform formatting
     silent: true
