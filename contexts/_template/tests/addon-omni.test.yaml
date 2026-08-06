@@ -300,6 +300,71 @@ cases:
             substitutions:
               omni_wireguard_service_type: NodePort
               omni_wireguard_advertised_endpoint: 10.5.0.10:30180
+      config:
+        cluster:
+          controlplanes:
+            hostports:
+              - "8080:30080/tcp"
+              - "8443:30443/tcp"
+              - "30180:30180/udp"
+          workers:
+            hostports:
+              - "8080:30080/tcp"
+              - "8443:30443/tcp"
+              - "30180:30180/udp"
+
+  # omni.wireguard.node_port overrides the chart's default (30180) on a port conflict —
+  # the substitution, the advertised endpoint derivation, and the docker-desktop hostport
+  # publish all have to stay in sync with the same override.
+  - name: honors a custom wireguard node_port on docker-desktop
+    values:
+      platform: docker
+      network: *default-network
+      cluster: *default-cluster
+      dns:
+        private_domain: cluster.local
+      identity:
+        enabled: true
+      provisioning:
+        enabled: true
+      workstation:
+        runtime: docker-desktop
+      omni:
+        etcd_encryption_key: |
+          -----BEGIN PGP PRIVATE KEY BLOCK-----
+          dGVzdC1rZXktbWF0ZXJpYWw=
+          -----END PGP PRIVATE KEY BLOCK-----
+        initial_admins:
+          - admin@example.com
+        wireguard:
+          node_port: 31000
+    terraformOutputs:
+      compute:
+        controlplanes:
+          - endpoint: 10.5.0.10:6443
+            node: 10.5.0.10
+            hostname: controlplane-1
+        workers: []
+      workstation: {}
+    expect:
+      flux:
+        - name: omni
+          install:
+            substitutions:
+              omni_wireguard_node_port: 31000
+              omni_wireguard_advertised_endpoint: 10.5.0.10:31000
+      config:
+        cluster:
+          controlplanes:
+            hostports:
+              - "8080:30080/tcp"
+              - "8443:30443/tcp"
+              - "31000:31000/udp"
+          workers:
+            hostports:
+              - "8080:30080/tcp"
+              - "8443:30443/tcp"
+              - "31000:31000/udp"
 
   # provisioning.enabled fans identity and image_factory on by default (config-provisioning.yaml);
   # omni itself stays off unless provisioning.enabled is true.
