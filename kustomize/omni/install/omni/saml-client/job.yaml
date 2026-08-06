@@ -76,7 +76,7 @@ spec:
           command: ["/bin/sh", "-c"]
           args:
             - |
-              set -eu
+              set -euo pipefail
               umask 077
               KC="http://keycloak-service.system-identity:8080"
               REALM="${keycloak_realm}"
