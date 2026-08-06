@@ -92,6 +92,7 @@ spec:
     service:
       wireguard:
         type: ${omni_wireguard_service_type}
+        nodePort: ${omni_wireguard_node_port}
     resources:
       requests:
         cpu: 500m

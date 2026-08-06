@@ -139,6 +139,9 @@ properties:
           advertised_endpoint:
             type: string
             description: host:port machines dial for SideroLink, overriding the derived hostname/NodePort. Changing this after machines have joined requires re-provisioning them.
+          node_port:
+            type: integer
+            description: NodePort for the WireGuard Service (chart default 30180). Override on a port conflict; also republishes as the docker-desktop hostport.
         additionalProperties: false
       persistence_size:
         type: string

@@ -68,6 +68,10 @@ config:
       # NodePort where no cloud load balancer exists; LoadBalancer everywhere else —
       # same split option-gateway.yaml uses for its own redirect port.
       wireguard_service_type: "${omni.wireguard.service_type ?? (workstation.runtime == 'docker-desktop' ? 'NodePort' : 'LoadBalancer')}"
+      # The chart's own default (siderolabs/omni service.wireguard.nodePort). Operator-
+      # configurable for port conflicts; also threaded into the docker-desktop hostport
+      # publish below so the two stay in sync.
+      wireguard_node_port: "${omni.wireguard.node_port ?? 30180}"
       # NodePort topologies can derive host:port from the first control-plane node's
       # own address — terraform_output("compute", "controlplanes") where a compute
       # module provisions it, else cluster.controlplanes.nodes directly (metal has no
@@ -80,11 +84,48 @@ config:
         ${omni.wireguard.advertised_endpoint
           ?? ((omni.wireguard.service_type ?? (workstation.runtime == 'docker-desktop' ? 'NodePort' : 'LoadBalancer')) == 'NodePort'
               ? (len(terraform_output('compute', 'controlplanes') ?? []) > 0
-                  ? (split(terraform_output('compute', 'controlplanes')[0].endpoint, ':')[0] + ':30180')
+                  ? (split(terraform_output('compute', 'controlplanes')[0].endpoint, ':')[0] + ':' + string(omni.wireguard.node_port ?? 30180))
                   : (len(values(cluster.controlplanes.nodes ?? {})) > 0
-                      ? (split(values(cluster.controlplanes.nodes)[0].endpoint, ':')[0] + ':30180')
+                      ? (split(values(cluster.controlplanes.nodes)[0].endpoint, ':')[0] + ':' + string(omni.wireguard.node_port ?? 30180))
                       : ''))
               : '')}
+
+  # docker-desktop's VM networking only forwards explicitly published container ports —
+  # unlike a real node, the container's NodePort isn't otherwise host-reachable. Without
+  # this, wireguard_advertised_endpoint above points at a host:port nothing is listening
+  # on. Same-port passthrough (host == container) so it matches the endpoint derivation
+  # without threading the node_port override through twice.
+  #
+  # Reads omni.wireguard.* directly rather than omni_effective — omni_effective's own
+  # endpoint derivation falls back to reading cluster.controlplanes.nodes, so depending
+  # on omni_effective here would make `cluster` and `omni_effective` reference each
+  # other, which the composer rejects as circular. Repeats the small NodePort-vs-
+  # LoadBalancer default inline instead; this block's own `when` already pins
+  # docker-desktop, so the nested default collapses to NodePort.
+  #
+  # Set unconditionally rather than `cluster.controlplanes.hostports ?? [...]` — reading
+  # the same path this block writes is its own self-reference. An operator's own
+  # values.yaml still wins: raw (undefaulted) values merge over facet-computed config
+  # last each round, the same precedence the identity/image_factory fan-out above relies
+  # on — so this only takes over when the operator hasn't set the hostports list
+  # themselves. A supplied list takes over the gateway's default pair too, same as it
+  # always has.
+  #
+  # A NodePort is reachable via any cluster node regardless of which one backs the
+  # Service, so publishing on controlplanes alone is already sufficient — but published
+  # on workers too for consistency, matching option-workstation.yaml's own symmetric
+  # default for the gateway's ports.
+  - name: cluster
+    when: workstation.runtime == 'docker-desktop' && (omni.wireguard.service_type ?? 'NodePort') == 'NodePort'
+    value:
+      controlplanes:
+        hostports: >-
+          ${["8080:30080/tcp", "8443:30443/tcp",
+             string(omni.wireguard.node_port ?? 30180) + ":" + string(omni.wireguard.node_port ?? 30180) + "/udp"]}
+      workers:
+        hostports: >-
+          ${["8080:30080/tcp", "8443:30443/tcp",
+             string(omni.wireguard.node_port ?? 30180) + ":" + string(omni.wireguard.node_port ?? 30180) + "/udp"]}
 
   # Split from the block above so the dev-only key can be a plain literal rather
   # than an expression string (the expression grammar has no escape for embedded
@@ -159,6 +200,7 @@ flux:
         # unrelated placeholder identity.
         omni_initial_admins: "${omni.initial_admins ?? (dev == true ? ['admin@local.test'] : [])}"
         omni_wireguard_service_type: "${omni_effective.wireguard_service_type}"
+        omni_wireguard_node_port: "${omni_effective.wireguard_node_port}"
         omni_wireguard_advertised_endpoint: "${omni_effective.wireguard_advertised_endpoint}"
         # The chart fetches this itself, server-side, so the internal (backchannel)
         # descriptor URL avoids depending on the gateway route being reachable.

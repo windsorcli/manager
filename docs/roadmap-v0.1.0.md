@@ -30,6 +30,10 @@ local user store and needs a place to keep its secrets.
   upstream registries.
 - **Fleet observability.** Core already runs a per-cluster stack. The aggregation half can
   follow once there is a fleet to aggregate.
+- **Bare-metal PXE boot orchestration.** Needed once machines without BMC/Redfish out-of-band
+  management join the fleet — a boot orchestrator (e.g. Tinkerbell) would sit between Image
+  Factory (image build) and Omni (fleet lifecycle), owning only DHCP/PXE/iPXE handoff. Not
+  needed for a Hetzner-only first cut; revisit alongside 0005/0006 once metal is in scope.
 
 ## Open questions
 
