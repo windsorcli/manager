@@ -100,6 +100,14 @@ properties:
                 default: false
                 description: Allow HTTP or invalid TLS to the schematic registry.
             additionalProperties: false
+          installer:
+            type: object
+            properties:
+              repository:
+                type: string
+                default: installer
+                description: Repository name the factory pushes built installer images to, on the same registry as schematic.
+            additionalProperties: false
         additionalProperties: false
         description: Registries the factory reads from and writes to.
     additionalProperties: false
