@@ -192,6 +192,67 @@ cases:
               - omni
               - omni/saml-client
               - omni/prometheus
+          resources:
+            - components:
+                - omni/gateway
+        - name: manager-observability
+          resources:
+            - components:
+                - prometheus/alerts/omni
+                - grafana/dashboards/omni
+
+  # omni.service_account_key alone isn't enough -- omni/exporter also needs
+  # telemetry.metrics.enabled, same as omni/prometheus, since its ServiceMonitor
+  # needs the prometheus-operator CRDs.
+  - name: leaves the exporter out without metrics enabled
+    values:
+      platform: metal
+      network: *default-network
+      cluster: *default-cluster
+      dns:
+        private_domain: cluster.local
+      identity:
+        enabled: true
+      provisioning:
+        enabled: true
+      omni:
+        <<: *default-omni
+        service_account_key: dGVzdC1rZXk=
+    expect:
+      flux:
+        - name: omni
+          install:
+            components:
+              - omni
+              - omni/saml-client
+
+  # Both telemetry.metrics.enabled and omni.service_account_key add the exporter.
+  - name: adds the exporter component once a service account key is supplied
+    values:
+      platform: metal
+      network: *default-network
+      cluster: *default-cluster
+      dns:
+        private_domain: cluster.local
+      identity:
+        enabled: true
+      telemetry:
+        metrics:
+          enabled: true
+      provisioning:
+        enabled: true
+      omni:
+        <<: *default-omni
+        service_account_key: dGVzdC1rZXk=
+    expect:
+      flux:
+        - name: omni
+          install:
+            components:
+              - omni
+              - omni/saml-client
+              - omni/prometheus
+              - omni/exporter
 
   # Custom persistence size and wireguard advertised endpoint both flow through.
   - name: honors persistence size and wireguard advertised endpoint overrides
