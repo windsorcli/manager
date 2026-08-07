@@ -1,0 +1,44 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: image-factory-alerts
+  namespace: image-factory
+spec:
+  groups:
+    - name: image-factory-supplemental.rules
+      rules:
+        # job is the metrics Service's own name (image-factory-metrics), set by the
+        # ServiceMonitor Core's image-factory/prometheus component enables.
+        - alert: ImageFactoryAbsent
+          expr: absent(up{job="image-factory-metrics"})
+          for: 10m
+          labels:
+            severity: critical
+          annotations:
+            summary: Image factory absent (job {{ $labels.job }})
+            description: "The image factory has disappeared from Prometheus service discovery. Talos machines can no longer pull schematics, boot media, or installer images from it.\n  VALUE = {{ $value }}\n  LABELS = {{ $labels }}"
+
+        # code is the numeric HTTP status code (Go's promhttp middleware), so
+        # code=~"5.." covers every 5xx handler response across schematic/asset/registry
+        # endpoints alike. job-scoped since http_request_duration_seconds is a common
+        # middleware metric name other services could also expose.
+        - alert: ImageFactoryHighServerErrorRate
+          expr: sum(rate(http_request_duration_seconds_count{job="image-factory-metrics",code=~"5.."}[5m])) / sum(rate(http_request_duration_seconds_count{job="image-factory-metrics"}[5m])) > 0.05
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: Image factory server error rate above 5%
+            description: "More than 5% of the image factory's HTTP responses have been 5xx over the last 5 minutes.\n  VALUE = {{ $value }}\n  LABELS = {{ $labels }}"
+
+        # image_factory_assets_cached_errors_total counts failures caching a built
+        # asset (arch/output_kind/talos_version-labeled) -- any increase means a Talos
+        # machine's boot media or installer pull is failing, not just running slow.
+        - alert: ImageFactoryAssetCacheErrors
+          expr: sum(increase(image_factory_assets_cached_errors_total[15m])) > 0
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: Image factory asset cache errors
+            description: "The image factory failed to cache at least one built asset in the last 15 minutes. Machines requesting that asset will retry the full build on every pull instead of hitting cache.\n  VALUE = {{ $value }}\n  LABELS = {{ $labels }}"

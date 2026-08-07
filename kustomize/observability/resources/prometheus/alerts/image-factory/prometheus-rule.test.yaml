@@ -1,0 +1,101 @@
+rule_files:
+  - .rendered-rule.yml
+
+evaluation_interval: 1m
+
+tests:
+  # No up{job="image-factory-metrics"} series at all -- absent() is active from t=0.
+  - interval: 1m
+    input_series: []
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: ImageFactoryAbsent
+        exp_alerts: []
+      - eval_time: 11m
+        alertname: ImageFactoryAbsent
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              job: image-factory-metrics
+            exp_annotations:
+              summary: 'Image factory absent (job image-factory-metrics)'
+              description: "The image factory has disappeared from Prometheus service discovery. Talos machines can no longer pull schematics, boot media, or installer images from it.\n  VALUE = 1\n  LABELS = map[job:image-factory-metrics]"
+
+  - interval: 1m
+    input_series:
+      - series: 'up{job="image-factory-metrics",instance="10.244.0.45:2122"}'
+        values: '1+0x20'
+    alert_rule_test:
+      - eval_time: 11m
+        alertname: ImageFactoryAbsent
+        exp_alerts: []
+
+  # 1 of 20 requests is a 5xx (5%) -- right at the threshold, not over it.
+  - interval: 1m
+    input_series:
+      - series: 'http_request_duration_seconds_count{job="image-factory-metrics",code="200",handler="/schematics"}'
+        values: '0+19x30'
+      - series: 'http_request_duration_seconds_count{job="image-factory-metrics",code="500",handler="/schematics"}'
+        values: '0+1x30'
+    alert_rule_test:
+      - eval_time: 16m
+        alertname: ImageFactoryHighServerErrorRate
+        exp_alerts: []
+
+  # 2 of 20 requests are 5xx (10%), sustained past the 10m "for" window.
+  - interval: 1m
+    input_series:
+      - series: 'http_request_duration_seconds_count{job="image-factory-metrics",code="200",handler="/schematics"}'
+        values: '0+18x30'
+      - series: 'http_request_duration_seconds_count{job="image-factory-metrics",code="500",handler="/schematics"}'
+        values: '0+2x30'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: ImageFactoryHighServerErrorRate
+        exp_alerts: []
+      - eval_time: 11m
+        alertname: ImageFactoryHighServerErrorRate
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: 'Image factory server error rate above 5%'
+              description: "More than 5% of the image factory's HTTP responses have been 5xx over the last 5 minutes.\n  VALUE = 0.1\n  LABELS = map[]"
+
+  # Cache errors on a different job never count toward this alert.
+  - interval: 1m
+    input_series:
+      - series: 'http_request_duration_seconds_count{job="some-other-service",code="500",handler="/x"}'
+        values: '0+5x30'
+    alert_rule_test:
+      - eval_time: 11m
+        alertname: ImageFactoryHighServerErrorRate
+        exp_alerts: []
+
+  # Counter never moves -- no cache errors, never fires.
+  - interval: 1m
+    input_series:
+      - series: 'image_factory_assets_cached_errors_total{arch="amd64",output_kind="installer",talos_version="1.13.5"}'
+        values: '0+0x30'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: ImageFactoryAssetCacheErrors
+        exp_alerts: []
+
+  # One cache error at t=3m, sustained past the 5m "for" window.
+  - interval: 1m
+    input_series:
+      - series: 'image_factory_assets_cached_errors_total{arch="amd64",output_kind="installer",talos_version="1.13.5"}'
+        values: '0+0x2 1+0x30'
+    alert_rule_test:
+      - eval_time: 2m
+        alertname: ImageFactoryAssetCacheErrors
+        exp_alerts: []
+      - eval_time: 9m
+        alertname: ImageFactoryAssetCacheErrors
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: 'Image factory asset cache errors'
+              description: "The image factory failed to cache at least one built asset in the last 15 minutes. Machines requesting that asset will retry the full build on every pull instead of hitting cache.\n  VALUE = 1\n  LABELS = map[]"

@@ -98,6 +98,60 @@ cases:
               - image-factory/ha
               - image-factory/prometheus
 
+  # Metrics on: the manager-observability contribution (alerts + dashboard) lands
+  # alongside image-factory/prometheus.
+  - name: adds the manager-observability contribution when metrics are enabled
+    values:
+      platform: metal
+      network: *default-network
+      cluster: *default-cluster
+      gateway:
+        enabled: true
+        driver: envoy
+      telemetry:
+        metrics:
+          enabled: true
+      image_factory: *default-factory
+    expect:
+      flux:
+        - name: image-factory
+          install:
+            components:
+              - image-factory
+              - image-factory/prometheus
+        - name: manager-observability
+          resources:
+            - components:
+                - prometheus/alerts/image-factory
+                - grafana/dashboards/image-factory
+
+  # No metrics: neither the ServiceMonitor nor the manager-observability contribution
+  # (which reads the factory's own metrics) has anything to scrape.
+  - name: leaves manager-observability out without metrics enabled
+    values:
+      platform: metal
+      network: *default-network
+      cluster: *default-cluster
+      gateway:
+        enabled: true
+        driver: envoy
+      # Explicit false, not just omitted: config-observability's own manager-observability
+      # entry defaults telemetry.metrics.enabled to true, so leaving it unset would still
+      # produce the (otherwise-empty) system and this exclude would fail for the wrong reason.
+      telemetry:
+        metrics:
+          enabled: false
+      image_factory: *default-factory
+    expect:
+      flux:
+        - name: image-factory
+          install:
+            components:
+              - image-factory
+    exclude:
+      flux:
+        - name: manager-observability
+
   # In-cluster registry with nothing to back it: a PVC on the default storage class.
   - name: backs the in-cluster registry with a pvc when no object store resolves
     values:
