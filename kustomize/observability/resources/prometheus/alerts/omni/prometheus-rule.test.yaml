@@ -1,0 +1,156 @@
+rule_files:
+  - .rendered-rule.yml
+
+evaluation_interval: 1m
+
+tests:
+  # No up{job="omni-metrics"} series at all -- absent() is active from t=0.
+  - interval: 1m
+    input_series: []
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: OmniAbsent
+        exp_alerts: []
+      - eval_time: 11m
+        alertname: OmniAbsent
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              job: omni-metrics
+            exp_annotations:
+              summary: 'Omni absent (job omni-metrics)'
+              description: "Omni has disappeared from Prometheus service discovery. The fleet's Talos control plane is unreachable -- no cluster can be managed until it's back.\n  VALUE = 1\n  LABELS = map[job:omni-metrics]"
+
+  - interval: 1m
+    input_series:
+      - series: 'up{job="omni-metrics",instance="10.244.0.24:2122"}'
+        values: '1+0x20'
+    alert_rule_test:
+      - eval_time: 11m
+        alertname: OmniAbsent
+        exp_alerts: []
+
+  # All handshake-age observations land in the first bucket (le=120) -- p50
+  # interpolates within [0,120], well under the 480s threshold.
+  - interval: 1m
+    input_series:
+      - series: 'omni_siderolink_last_handshake_seconds_bucket{le="120"}'
+        values: '0+10x30'
+      - series: 'omni_siderolink_last_handshake_seconds_bucket{le="240"}'
+        values: '0+10x30'
+      - series: 'omni_siderolink_last_handshake_seconds_bucket{le="480"}'
+        values: '0+10x30'
+      - series: 'omni_siderolink_last_handshake_seconds_bucket{le="960"}'
+        values: '0+10x30'
+      - series: 'omni_siderolink_last_handshake_seconds_bucket{le="1920"}'
+        values: '0+10x30'
+      - series: 'omni_siderolink_last_handshake_seconds_bucket{le="3840"}'
+        values: '0+10x30'
+      - series: 'omni_siderolink_last_handshake_seconds_bucket{le="+Inf"}'
+        values: '0+10x30'
+    alert_rule_test:
+      - eval_time: 25m
+        alertname: OmniSiderolinkHandshakesStale
+        exp_alerts: []
+
+  # Every observation lands in the (480,960] bucket -- p50 interpolates well above
+  # 480s, sustained past the 15m "for" window.
+  - interval: 1m
+    input_series:
+      - series: 'omni_siderolink_last_handshake_seconds_bucket{le="120"}'
+        values: '0+0x30'
+      - series: 'omni_siderolink_last_handshake_seconds_bucket{le="240"}'
+        values: '0+0x30'
+      - series: 'omni_siderolink_last_handshake_seconds_bucket{le="480"}'
+        values: '0+0x30'
+      - series: 'omni_siderolink_last_handshake_seconds_bucket{le="960"}'
+        values: '0+8x30'
+      - series: 'omni_siderolink_last_handshake_seconds_bucket{le="1920"}'
+        values: '0+8x30'
+      - series: 'omni_siderolink_last_handshake_seconds_bucket{le="3840"}'
+        values: '0+8x30'
+      - series: 'omni_siderolink_last_handshake_seconds_bucket{le="+Inf"}'
+        values: '0+8x30'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: OmniSiderolinkHandshakesStale
+        exp_alerts: []
+      - eval_time: 26m
+        alertname: OmniSiderolinkHandshakesStale
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: 'Median SideroLink handshake age above 8 minutes'
+              description: "The median time since the last WireGuard handshake, across all SideroLink peers, has been above 480s (Omni's own 'considered disconnected' boundary) for 15 minutes.\n  VALUE = 720\n  LABELS = map[]"
+
+  # 1 of 20 requests is a 5xx (5%) -- right at the threshold, not over it.
+  - interval: 1m
+    input_series:
+      - series: 'http_requests_total{code="200",method="get",handler="api"}'
+        values: '0+19x30'
+      - series: 'http_requests_total{code="500",method="get",handler="api"}'
+        values: '0+1x30'
+    alert_rule_test:
+      - eval_time: 16m
+        alertname: OmniHighServerErrorRate
+        exp_alerts: []
+
+  # 2 of 20 requests are 5xx (10%), sustained past the 10m "for" window.
+  - interval: 1m
+    input_series:
+      - series: 'http_requests_total{code="200",method="get",handler="api"}'
+        values: '0+18x30'
+      - series: 'http_requests_total{code="500",method="get",handler="api"}'
+        values: '0+2x30'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: OmniHighServerErrorRate
+        exp_alerts: []
+      - eval_time: 11m
+        alertname: OmniHighServerErrorRate
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: 'Omni server error rate above 5%'
+              description: "More than 5% of Omni's HTTP responses have been 5xx over the last 5 minutes.\n  VALUE = 0.1\n  LABELS = map[]"
+
+  # One cluster stuck in SCALING_UP, sustained past the 30m "for" window.
+  - interval: 1m
+    input_series:
+      - series: 'omni_clusters{phase="RUNNING"}'
+        values: '2+0x40'
+      - series: 'omni_clusters{phase="SCALING_UP"}'
+        values: '1+0x40'
+    alert_rule_test:
+      - eval_time: 25m
+        alertname: OmniClusterNotRunning
+        exp_alerts: []
+      - eval_time: 31m
+        alertname: OmniClusterNotRunning
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              phase: SCALING_UP
+            exp_annotations:
+              summary: 'An Omni-managed cluster has been stuck outside RUNNING (phase SCALING_UP)'
+              description: "At least one cluster has been in phase SCALING_UP for 30 minutes instead of RUNNING. Check the Omni UI for which cluster -- this metric only carries a count per phase.\n  VALUE = 1\n  LABELS = map[__name__:omni_clusters phase:SCALING_UP]"
+
+  # Every cluster RUNNING, every other phase at its enumerated zero -- never fires.
+  - interval: 1m
+    input_series:
+      - series: 'omni_clusters{phase="RUNNING"}'
+        values: '3+0x40'
+      - series: 'omni_clusters{phase="SCALING_UP"}'
+        values: '0+0x40'
+      - series: 'omni_clusters{phase="SCALING_DOWN"}'
+        values: '0+0x40'
+      - series: 'omni_clusters{phase="DESTROYING"}'
+        values: '0+0x40'
+      - series: 'omni_clusters{phase="UNKNOWN"}'
+        values: '0+0x40'
+    alert_rule_test:
+      - eval_time: 31m
+        alertname: OmniClusterNotRunning
+        exp_alerts: []

@@ -164,6 +164,10 @@ properties:
         items:
           type: string
         description: Emails seeded as admins on Omni's first start (config.auth.initialUsers), before Keycloak SAML group membership grants any role. Bootstrap only, not how production access is granted. The chart refuses to start with none at all — required outside dev mode; dev mode seeds a fixed placeholder. Deliberately no default here — a schema default would be materialized ahead of the facet's own null-coalescing fallback, permanently masking the dev-mode default.
+      service_account_key:
+        type: string
+        sensitive: true
+        description: Base64-encoded Omni service account key for the omni_exporter Deployment (client.WithServiceAccount). Nothing in this repo can create it — Omni has no non-interactive bootstrap credential, only SAML/WebAuthn/Auth0 login, so an admin has to log in once and run `omnictl serviceaccount create --use-user-role=false --role=Reader omni-exporter`, then set this via a secret() reference. Unset leaves the exporter Deployment out entirely; nothing else in this facet depends on it.
     additionalProperties: false
     description: Self-hosted Sidero Omni fleet control plane
 
