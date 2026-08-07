@@ -1,0 +1,41 @@
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+
+# Hand-authored, not vendored: no upstream Omni Grafana dashboard exists (checked
+# grafana.com, the omni_exporter repo, and Sidero's own GitHub/docs — none publish
+# one). Panels are built from Omni's own native /metrics — omni_machines,
+# omni_connected_machines, omni_clusters, omni_machines_version,
+# omni_siderolink_last_handshake_seconds, http_requests_total — the same metrics
+# prometheus/alerts/omni's PrometheusRule alerts on, verified live against a running
+# instance. Does not depend on the omni/exporter component (off by default; needs a
+# manual service-account bootstrap) — everything here works from what
+# telemetry.metrics.enabled alone already scrapes.
+#
+# namespace: system-observability, not omni — confirmed live (grafana-sc-dashboard's
+# own logs: "Performing list-based sync on configmap resources: {'namespace':
+# 'system-observability'}"). The kiwigrid/k8s-sidecar Grafana runs is scoped to its
+# own namespace, not cluster-wide, despite no searchNamespace override being set in
+# Core's HelmRelease values — that's also why Core's own dashboards (including
+# identity's, for Keycloak, which runs in system-identity) all target
+# system-observability regardless of subject. PrometheusRule genuinely is
+# cluster-wide (a different mechanism, the Prometheus Operator's own controller,
+# confirmed live too) — the two aren't symmetric.
+#
+# omni-overview-dashboard.json's every ${datasource} is escaped to $${datasource} —
+# Flux's postBuild substitution walks every resource in this Kustomization and fails
+# strict-mode on any ${...} it doesn't recognize, and Grafana's own templating
+# variable isn't one of Flux's. Same escape Core's own vendor-dashboards.sh applies to
+# every vendored dashboard, and the same $${...} convention omni/saml-client's Job
+# script uses for its own shell variables.
+
+configMapGenerator:
+  - name: grafana-dashboard-omni
+    namespace: system-observability
+    files:
+      - omni-overview-dashboard.json
+    options:
+      disableNameSuffixHash: true
+      labels:
+        grafana_dashboard: "1"
+      annotations:
+        grafana_folder: "Omni"

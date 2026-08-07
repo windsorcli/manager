@@ -1,0 +1,234 @@
+{
+  "title": "Image Factory / Overview",
+  "uid": "image-factory-overview",
+  "tags": ["image-factory"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "refresh": "30s",
+  "time": { "from": "now-6h", "to": "now" },
+  "templating": {
+    "list": [
+      {
+        "current": { "selected": true, "text": "Prometheus", "value": "prometheus" },
+        "hide": 0,
+        "includeAll": false,
+        "label": "Datasource",
+        "multi": false,
+        "name": "datasource",
+        "options": [],
+        "query": "prometheus",
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false,
+        "type": "datasource"
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Image Factory",
+      "gridPos": { "x": 0, "y": 0, "w": 6, "h": 4 },
+      "datasource": { "type": "prometheus", "uid": "$${datasource}" },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "$${datasource}" }, "expr": "max(up{job=\"image-factory-metrics\"})", "refId": "A" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            { "type": "value", "options": { "0": { "text": "DOWN", "color": "red" }, "1": { "text": "UP", "color": "green" } } }
+          ],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 1 }] }
+        }
+      },
+      "options": { "colorMode": "background", "graphMode": "none", "textMode": "value" }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Assets Built",
+      "description": "Total assets built (installer/kernel/initramfs/etc, across every arch) over the dashboard's time range.",
+      "gridPos": { "x": 6, "y": 0, "w": 6, "h": 4 },
+      "datasource": { "type": "prometheus", "uid": "$${datasource}" },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "$${datasource}" }, "expr": "sum(increase(image_factory_assets_built_total[$__range]))", "refId": "A" }
+      ],
+      "options": { "colorMode": "value", "graphMode": "none", "textMode": "value" }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Cache Errors",
+      "description": "Failures caching a built asset over the dashboard's time range -- any nonzero value means a repeated build cost, not just a slower one.",
+      "gridPos": { "x": 12, "y": 0, "w": 6, "h": 4 },
+      "datasource": { "type": "prometheus", "uid": "$${datasource}" },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "$${datasource}" }, "expr": "sum(increase(image_factory_assets_cached_errors_total[$__range]))", "refId": "A" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 1 }] }
+        }
+      },
+      "options": { "colorMode": "value", "graphMode": "none", "textMode": "value" }
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Schematic Cache Size",
+      "gridPos": { "x": 18, "y": 0, "w": 6, "h": 4 },
+      "datasource": { "type": "prometheus", "uid": "$${datasource}" },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "$${datasource}" }, "expr": "sum(image_factory_schematic_cache_size)", "refId": "A" }
+      ],
+      "options": { "colorMode": "value", "graphMode": "none", "textMode": "value" }
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Assets built by arch",
+      "gridPos": { "x": 0, "y": 4, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "$${datasource}" },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "$${datasource}" }, "expr": "sum by (arch) (rate(image_factory_assets_built_total[5m]))", "legendFormat": "{{arch}}", "refId": "A" }
+      ],
+      "fieldConfig": { "defaults": { "custom": { "drawStyle": "line", "fillOpacity": 10 } } }
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Schematic cache activity",
+      "description": "duplicate_create is a cache hit -- the schematic already existed, so no rebuild happened. get is any schematic lookup, hit or miss.",
+      "gridPos": { "x": 12, "y": 4, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "$${datasource}" },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "$${datasource}" }, "expr": "sum(rate(image_factory_schematic_create_total[5m]))", "legendFormat": "created", "refId": "A" },
+        { "datasource": { "type": "prometheus", "uid": "$${datasource}" }, "expr": "sum(rate(image_factory_schematic_duplicate_create_total[5m]))", "legendFormat": "duplicate (cache hit)", "refId": "B" },
+        { "datasource": { "type": "prometheus", "uid": "$${datasource}" }, "expr": "sum(rate(image_factory_schematic_get_total[5m]))", "legendFormat": "get", "refId": "C" }
+      ],
+      "fieldConfig": { "defaults": { "custom": { "drawStyle": "line", "fillOpacity": 10 } } }
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Build latency (p50)",
+      "gridPos": { "x": 0, "y": 12, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "$${datasource}" },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "$${datasource}" }, "expr": "histogram_quantile(0.5, sum by (le) (rate(image_factory_assets_build_latency_seconds_bucket[15m])))", "legendFormat": "p50 build latency", "refId": "A" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": { "drawStyle": "line", "fillOpacity": 10 }
+        }
+      }
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "Concurrency wait latency (p50)",
+      "description": "Time a build request spends waiting for a free build slot -- factory_max_concurrency (image_factory.max_concurrency) caps concurrent builds. A rising trend means that limit is the bottleneck, not build speed itself.",
+      "gridPos": { "x": 12, "y": 12, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "$${datasource}" },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "$${datasource}" }, "expr": "histogram_quantile(0.5, sum by (le) (rate(image_factory_assets_concurrency_latency_seconds_bucket[15m])))", "legendFormat": "p50 wait latency", "refId": "A" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": { "drawStyle": "line", "fillOpacity": 10 }
+        }
+      }
+    },
+    {
+      "id": 9,
+      "type": "timeseries",
+      "title": "HTTP request rate by status code",
+      "gridPos": { "x": 0, "y": 20, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "$${datasource}" },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "$${datasource}" }, "expr": "sum by (code) (rate(http_request_duration_seconds_count{job=\"image-factory-metrics\"}[5m]))", "legendFormat": "{{code}}", "refId": "A" }
+      ],
+      "fieldConfig": { "defaults": { "custom": { "drawStyle": "line", "fillOpacity": 10, "stacking": { "mode": "normal" } } } }
+    },
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "5xx error rate",
+      "description": "The ImageFactoryHighServerErrorRate alert fires above 5%.",
+      "gridPos": { "x": 12, "y": 20, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "$${datasource}" },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "$${datasource}" }, "expr": "100 * sum(rate(http_request_duration_seconds_count{job=\"image-factory-metrics\",code=~\"5..\"}[5m])) / sum(rate(http_request_duration_seconds_count{job=\"image-factory-metrics\"}[5m]))", "legendFormat": "5xx %", "refId": "A" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "max": 100,
+          "min": 0,
+          "custom": { "drawStyle": "line", "fillOpacity": 10 },
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 5 }] }
+        }
+      }
+    },
+    {
+      "id": 11,
+      "type": "stat",
+      "title": "Volume Capacity",
+      "description": "The registry PVC's requested size (image_factory.registry_size), not the underlying filesystem's real capacity -- see the note on the Used % panel.",
+      "gridPos": { "x": 0, "y": 28, "w": 8, "h": 4 },
+      "datasource": { "type": "prometheus", "uid": "$${datasource}" },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "$${datasource}" }, "expr": "sum(kube_persistentvolumeclaim_resource_requests_storage_bytes{namespace=\"image-factory\",persistentvolumeclaim=\"registry\"})", "refId": "A" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "bytes" } },
+      "options": { "colorMode": "value", "graphMode": "none", "textMode": "value" }
+    },
+    {
+      "id": 12,
+      "type": "stat",
+      "title": "Volume Used",
+      "gridPos": { "x": 8, "y": 28, "w": 8, "h": 4 },
+      "datasource": { "type": "prometheus", "uid": "$${datasource}" },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "$${datasource}" }, "expr": "sum(kubelet_volume_stats_used_bytes{namespace=\"image-factory\",persistentvolumeclaim=\"registry\"})", "refId": "A" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "bytes" } },
+      "options": { "colorMode": "value", "graphMode": "none", "textMode": "value" }
+    },
+    {
+      "id": 13,
+      "type": "stat",
+      "title": "Volume Used %",
+      "description": "Against kubelet's own reported filesystem capacity, not the PVC's requested size -- on a storage class that doesn't enforce quotas (e.g. this repo's local-path default), the two can differ a lot. This is the number that predicts actual disk pressure.",
+      "gridPos": { "x": 16, "y": 28, "w": 8, "h": 4 },
+      "datasource": { "type": "prometheus", "uid": "$${datasource}" },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "$${datasource}" }, "expr": "100 * sum(kubelet_volume_stats_used_bytes{namespace=\"image-factory\",persistentvolumeclaim=\"registry\"}) / sum(kubelet_volume_stats_capacity_bytes{namespace=\"image-factory\",persistentvolumeclaim=\"registry\"})", "refId": "A" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "max": 100,
+          "min": 0,
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "orange", "value": 75 }, { "color": "red", "value": 90 }] }
+        }
+      },
+      "options": { "colorMode": "value", "graphMode": "none", "textMode": "value" }
+    },
+    {
+      "id": 14,
+      "type": "timeseries",
+      "title": "Volume usage over time",
+      "gridPos": { "x": 0, "y": 32, "w": 24, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "$${datasource}" },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "$${datasource}" }, "expr": "sum by (persistentvolumeclaim) (kubelet_volume_stats_used_bytes{namespace=\"image-factory\",persistentvolumeclaim=\"registry\"})", "legendFormat": "{{persistentvolumeclaim}} used", "refId": "A" },
+        { "datasource": { "type": "prometheus", "uid": "$${datasource}" }, "expr": "sum by (persistentvolumeclaim) (kubelet_volume_stats_capacity_bytes{namespace=\"image-factory\",persistentvolumeclaim=\"registry\"})", "legendFormat": "{{persistentvolumeclaim}} capacity", "refId": "B" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "bytes", "custom": { "drawStyle": "line", "fillOpacity": 10 } } }
+    }
+  ]
+}
