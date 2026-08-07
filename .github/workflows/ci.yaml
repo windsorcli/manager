@@ -166,14 +166,16 @@ jobs:
           restore-keys: |
             docker-cache-${{ runner.os }}-
 
-      # The image factory is off by default, so without --set this would bring up a bare
-      # Core cluster and assert nothing about what this repo adds. dns.domain matches what
-      # the add-on's route is published under.
+      # Provisioning is off by default, so without --set this would bring up a bare Core
+      # cluster and assert nothing about what this repo adds. provisioning.enabled fans on
+      # identity (Keycloak), image-factory, and omni together — see config-provisioning.yaml
+      # and addon-omni.yaml's `when:`. dns.domain matches what the add-ons' routes publish
+      # under.
       - name: Windsor Init
         run: |
           windsor init local --reset \
             --set dns.domain=test \
-            --set image_factory.enabled=true
+            --set provisioning.enabled=true
 
       - name: Show blueprint
         run: windsor show blueprint
@@ -183,14 +185,15 @@ jobs:
         timeout-minutes: 25
         run: windsor up --verbose --wait
 
-      # `windsor up --wait` returns once kustomizations reconcile; this pins down that the
-      # factory in particular is serving, rather than merely applied.
-      - name: Verify the image factory
+      # windsor up --wait already blocks on each Kustomization's Ready condition, which Flux
+      # only reports once every resource it applies passes kstatus health — Deployments
+      # rolled out, Jobs Complete. Re-checking rollout status here would just re-assert what
+      # getting past --wait already proved. What --wait can't prove is that the saml-client
+      # Job did the right thing rather than merely exiting 0, so check that explicitly.
+      - name: Verify the omni SAML client registered
         run: |
-          kubectl -n image-factory rollout status deploy/image-factory --timeout=5m
-          kubectl -n image-factory rollout status deploy/registry --timeout=5m
-          kubectl -n image-factory get pods -o wide
-          kubectl get kustomizations -A
+          kubectl -n omni wait --for=condition=complete job/keycloak-omni-saml-client --timeout=5m
+          kubectl -n omni logs job/keycloak-omni-saml-client | grep -qE 'registered omni saml client|already registered'
 
       - name: Diagnostics on failure
         if: failure()
@@ -201,6 +204,11 @@ jobs:
           kubectl -n image-factory describe pods || true
           kubectl -n image-factory logs -l app.kubernetes.io/name=image-factory --tail=200 || true
           kubectl -n image-factory logs -l app.kubernetes.io/name=registry --tail=200 || true
+          kubectl -n system-identity get events --sort-by=.lastTimestamp || true
+          kubectl -n system-identity describe pods || true
+          kubectl -n omni get events --sort-by=.lastTimestamp || true
+          kubectl -n omni describe pods || true
+          kubectl -n omni logs job/keycloak-omni-saml-client --tail=200 || true
           flux get all -A || true
 
       - name: Windsor Down
