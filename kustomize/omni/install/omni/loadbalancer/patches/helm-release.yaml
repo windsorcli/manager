@@ -1,0 +1,12 @@
+# envoy driver: gateway-routing is cilium-only for now (docs/adr/0005), so this keeps
+# the chart's own dedicated LoadBalancer Service instead.
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: omni
+  namespace: omni
+spec:
+  values:
+    service:
+      wireguard:
+        type: LoadBalancer

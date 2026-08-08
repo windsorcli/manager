@@ -1,0 +1,27 @@
+# A dedicated Gateway, not a listener added to Core's shared one — that would mean
+# two independent Kustomizations both applying the same object under Flux's single
+# global field-manager identity, each pruning the other's contribution on every
+# reconcile (confirmed: Flux's kustomize-controller uses one field manager for all
+# Kustomizations, and its default SSA policy is Override). sharing-key reuses the
+# same external IP as the shared gateway instead of allocating a new one.
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: omni-wireguard
+  namespace: system-gateway
+spec:
+  gatewayClassName: cilium
+  infrastructure:
+    annotations:
+      lbipam.cilium.io/ips: ${loadbalancer_start_ip}
+      lbipam.cilium.io/sharing-key: external
+      lbipam.cilium.io/sharing-cross-namespace: "*"
+  listeners:
+    - name: wireguard-udp
+      protocol: UDP
+      port: ${omni_wireguard_node_port}
+      allowedRoutes:
+        namespaces:
+          from: All
+        kinds:
+          - kind: UDPRoute

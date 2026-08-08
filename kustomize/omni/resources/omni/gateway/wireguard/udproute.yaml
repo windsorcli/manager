@@ -8,7 +8,7 @@ metadata:
   namespace: omni
 spec:
   parentRefs:
-    - name: external
+    - name: omni-wireguard
       namespace: system-gateway
       sectionName: wireguard-udp
   rules:

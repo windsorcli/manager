@@ -65,18 +65,17 @@ config:
       # docker-desktop reaches the gateway on 8443 rather than 443 — same port
       # image-factory's own external URL derivation appends.
       external_port_suffix: "${workstation.runtime == 'docker-desktop' ? ':8443' : ''}"
-      # NodePort environments (docker-desktop by default) keep the chart's own
-      # dedicated Service (omni/nodeport component). Everywhere else routes through
-      # the shared gateway instead (omni/gateway/wireguard component: a UDP listener
-      # + UDPRoute), same pattern as Core's CoreDNS add-on.
-      # Also the gateway listener/Service port in the gateway-routed case.
+      # NodePort environments (docker-desktop by default) and envoy driver keep the
+      # chart's own dedicated Service (omni/nodeport, omni/loadbalancer). cilium
+      # driver routes through a dedicated Gateway sharing the shared gateway's IP
+      # instead (omni/gateway/wireguard) — see docs/adr/0005 for why not envoy too.
       wireguard_node_port: "${omni.wireguard.node_port ?? 30180}"
       # NodePort: derive from the control-plane node's own address (not 127.0.0.1 —
       # a remote device dials this, docker-desktop's loopback trick doesn't apply).
-      # LoadBalancer: the gateway's own address is pinned (lbipam.cilium.io/ips /
-      # envoy's loadBalancerIP), known without an apply. Cloud-managed LB
-      # controllers are the exception — dev mode gets a placeholder, others hit the
-      # requires: check below.
+      # cilium: the shared gateway's IP is pinned (lbipam.cilium.io/ips), known
+      # without an apply. Everything else (envoy's own dedicated Service, cloud LB
+      # controllers) has no derivable default — dev mode gets a placeholder, others
+      # hit the requires: check below.
       wireguard_advertised_endpoint: >-
         ${omni.wireguard.advertised_endpoint
           ?? (lb_effective.mode == 'nodeport'
@@ -85,7 +84,7 @@ config:
                   : (len(values(cluster.controlplanes.nodes ?? {})) > 0
                       ? (split(values(cluster.controlplanes.nodes)[0].endpoint, ':')[0] + ':' + string(omni.wireguard.node_port ?? 30180))
                       : (dev == true ? '0.0.0.0:' + string(omni.wireguard.node_port ?? 30180) : '')))
-              : ((lb_effective.enabled == true || (gateway.driver == 'cilium' && lb_effective.controller_required != true))
+              : (gateway.driver == 'cilium' && lb_effective.controller_required != true
                   ? network.loadbalancer_ips.start + ':' + string(omni.wireguard.node_port ?? 30180)
                   : (dev == true ? '0.0.0.0:' + string(omni.wireguard.node_port ?? 30180) : '')))}
 
@@ -158,6 +157,7 @@ flux:
         - omni/saml-client
         - "${(telemetry.metrics.enabled ?? false) == true ? 'omni/prometheus' : ''}"
         - "${lb_effective.mode == 'nodeport' ? 'omni/nodeport' : ''}"
+        - "${lb_effective.mode != 'nodeport' && gateway.driver != 'cilium' ? 'omni/loadbalancer' : ''}"
       substitutions:
         omni_account_id: "${omni.account_id ?? terraform_output('omni-account', 'id')}"
         omni_hostname: "${omni_effective.hostname}${omni_effective.external_port_suffix}"
@@ -197,19 +197,16 @@ flux:
           - gateway-resources
         components:
           - omni/gateway
+          # A dedicated Gateway sharing the shared one's external IP (Cilium's
+          # lbipam.cilium.io/sharing-key), not a listener added to the shared Gateway
+          # itself — that would need two Kustomizations both applying the same
+          # object under Flux's one global field-manager identity. envoy driver
+          # keeps the dedicated NodePort/LoadBalancer Service (omni/nodeport) for
+          # now; see docs/adr/0005.
+          - "${gateway.driver == 'cilium' && lb_effective.mode != 'nodeport' ? 'omni/gateway/wireguard' : ''}"
         substitutions:
           external_domain: "${omni_effective.domain}"
+          loadbalancer_start_ip: "${network.loadbalancer_ips.start}"
+          omni_wireguard_node_port: "${omni_effective.wireguard_node_port}"
         timeout: 10m
         interval: 5m
-
-  # Merges into Core's own "gateway" Kustomization (gateway-resources) rather than
-  # omni's own — a cross-Kustomization SSA patch to the shared Gateway object would
-  # fight Core's own field-manager ownership of it (Flux uses one field-manager
-  # identity per controller, not per Kustomization).
-  - name: gateway
-    when: gateway.enabled == true
-    resources:
-      - components:
-          - "${lb_effective.mode != 'nodeport' ? 'omni/gateway/wireguard' : ''}"
-        substitutions:
-          omni_wireguard_node_port: "${omni_effective.wireguard_node_port}"

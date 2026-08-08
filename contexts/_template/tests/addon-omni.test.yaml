@@ -324,10 +324,36 @@ cases:
                 - gateway-resources
               components:
                 - omni/gateway
-        - name: gateway
-          resources:
-            - components:
                 - omni/gateway/wireguard
+
+  # envoy driver keeps the chart's own dedicated LoadBalancer Service — gateway-routed
+  # wireguard is cilium-only for now (docs/adr/0005). The Service's own IP is
+  # unknowable ahead of an apply, same as ADR-0004's original design, so dev mode's
+  # placeholder covers it.
+  - name: keeps the dedicated LoadBalancer Service on the envoy driver
+    values:
+      dev: true
+      platform: metal
+      gateway:
+        driver: envoy
+      network: *default-network
+      cluster: *default-cluster
+      dns:
+        private_domain: cluster.local
+      identity:
+        enabled: true
+      provisioning:
+        enabled: true
+    expect:
+      flux:
+        - name: omni
+          install:
+            components:
+              - omni
+              - omni/saml-client
+              - omni/loadbalancer
+            substitutions:
+              omni_wireguard_advertised_endpoint: "0.0.0.0:30180"
 
   # docker-desktop defaults SideroLink to NodePort, so the advertised endpoint derives
   # from the first control-plane's own node IP and the chart's default NodePort — no

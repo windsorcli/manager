@@ -85,9 +85,9 @@ spec:
       enabled: true
       storageClassName: ${omni_persistence_storage_class}
       size: ${omni_persistence_size}
-    # main and k8sProxy stay ClusterIP (chart default). wireguard also routes through
-    # the shared gateway now (omni/gateway/wireguard component) rather than its own
-    # NodePort/LoadBalancer Service — port matches the gateway listener/UDPRoute.
+    # main and k8sProxy stay ClusterIP (chart default). wireguard defaults to
+    # ClusterIP too (cilium driver routes it through a dedicated Gateway); the
+    # nodeport/loadbalancer components override this for other cases.
     service:
       wireguard:
         type: ClusterIP
