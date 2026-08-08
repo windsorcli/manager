@@ -163,7 +163,8 @@ fi
 # Join tokens are invalidated by an Omni cluster recreate/restart (rotates alongside the
 # Private CA), which a downloaded config file's mtime can't detect on its own - just warn,
 # since the actual rejection is caught later once the VM is up (see the handshake wait below).
-JOIN_CONFIG_AGE_S=$(( $(date +%s) - $(stat -f %m "$JOIN_CONFIG") ))
+JOIN_CONFIG_MTIME=$(stat -f %m "$JOIN_CONFIG" 2>/dev/null || stat -c %Y "$JOIN_CONFIG")
+JOIN_CONFIG_AGE_S=$(( $(date +%s) - JOIN_CONFIG_MTIME ))
 if [ "$JOIN_CONFIG_AGE_S" -gt 1800 ]; then
   echo "warning: ${JOIN_CONFIG} is $((JOIN_CONFIG_AGE_S / 60)) minutes old - if Omni has" >&2
   echo "  restarted since it was downloaded, its join token is likely invalid. Re-download" >&2
