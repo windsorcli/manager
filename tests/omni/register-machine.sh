@@ -124,13 +124,9 @@ esac
 CLIENT_VERSION=$(talosctl version --client 2>/dev/null | awk '/Tag:/{print $2}')
 TALOS_VERSION="${TALOS_VERSION:-${CLIENT_VERSION#v}}"
 
-# Resolve straight to the real, pinned binary rather than command -v's result — for
-# aqua-managed installs that's a version-dispatching proxy whose own internal lookup
-# of the real binary falls back to a plain PATH search, and sudo's secure_path
-# overrides PATH regardless of -E, landing on whatever stale talosctl (e.g. an old
-# Homebrew install) happens to sit on that restricted path instead of the pinned
-# version. Executing the real binary directly leaves no PATH-dependent lookup for
-# sudo to get wrong.
+# aqua's talosctl is a version-dispatching proxy; under sudo its internal lookup of
+# the real binary can land on a stale one via secure_path. Resolve to the real
+# pinned binary directly to avoid that.
 if command -v aqua >/dev/null 2>&1 && aqua which talosctl >/dev/null 2>&1; then
   TALOSCTL=$(aqua which talosctl)
 else

@@ -42,22 +42,13 @@ Read that first if something here breaks in a new way.
   `local` context. This script's DNS and endpoint-reachability workarounds are
   specific to Docker Desktop's networking model — see the spike doc for what a
   Linux/CI equivalent would need instead (untested, likely different).
-- **Not colima.** Confirmed broken, not just untested: colima's own cluster lives
-  behind its own `vmnet-shared` network segment (`bridge100`), and this script's QEMU
-  VM gets its own, separate `vmnet-shared` segment (`bridge101`). Packet capture
-  confirms `vmnet.framework` doesn't route between two independent `vmnet-shared`
-  segments at all — packets from one never arrive on the other, below the level
-  where `ip route`/`pfctl` on the host could even help. `net.inet.ip.forwarding=1`
-  plus an explicit route inside colima's VM (`10.6.0.0/24 via 192.168.64.1 dev col0`)
-  still doesn't produce a single packet crossing over, confirmed with `tcpdump` on
-  the receiving bridge. A native (non-docker) DNS responder bound directly to the
-  QEMU bridge's own gateway address works around the *DNS* half of this (colima's
-  docker daemon can't bind a macOS-host-only address directly either), but the
-  *data-plane* traffic (the actual SideroLink WireGuard tunnel, HTTPS join calls)
-  hits the same wall regardless — there's no known host-level fix. Verifying the
-  actual gateway-routed WireGuard path on colima needs a fundamentally different
-  approach (e.g. a WireGuard test client running as a Pod inside the cluster itself,
-  sidestepping cross-VM routing entirely) — not attempted by this script today.
+- **Not colima.** Confirmed broken, not just untested: colima's cluster and this
+  script's QEMU VM each get their own `vmnet-shared` network segment, and
+  `vmnet.framework` doesn't route between separate `vmnet-shared` segments at all —
+  confirmed with `tcpdump`, no packets cross over regardless of host routes or
+  `ip.forwarding`. Verifying the gateway-routed WireGuard path on colima needs a
+  different approach (e.g. a WireGuard test client running as a Pod inside the
+  cluster) — not attempted by this script.
 - **A machine join config**, downloaded from Omni's own UI: sign in, then Home →
   "Download Machine Join Config". This is the one manual step. Omni's join tokens
   aren't reachable headlessly without a pre-provisioned `omnictl` service account, and
