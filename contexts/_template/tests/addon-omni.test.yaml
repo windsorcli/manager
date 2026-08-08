@@ -324,6 +324,9 @@ cases:
                 - gateway-resources
               components:
                 - omni/gateway
+        - name: gateway
+          resources:
+            - components:
                 - omni/gateway/wireguard
 
   # docker-desktop defaults SideroLink to NodePort, so the advertised endpoint derives

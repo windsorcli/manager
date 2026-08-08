@@ -1,5 +1,12 @@
 apiVersion: kustomize.config.k8s.io/v1alpha1
 kind: Component
 resources:
-  - gateway-listener.yaml
   - udproute.yaml
+patches:
+  - path: patches/listener.yaml
+    target:
+      group: gateway.networking.k8s.io
+      version: v1
+      kind: Gateway
+      name: external
+      namespace: system-gateway
