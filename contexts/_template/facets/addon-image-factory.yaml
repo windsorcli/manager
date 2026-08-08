@@ -92,6 +92,12 @@ flux:
         factory_min_talos_version: "${image_factory.min_talos_version ?? '1.2.0'}"
         factory_cache_registry: "${image_factory.registry.schematic.registry ?? 'registry.image-factory.svc.cluster.local:5000'}"
         factory_cache_insecure: "${(image_factory.registry.schematic.registry ?? '') == '' ? true : (image_factory.registry.schematic.insecure ?? false)}"
+        # Same registry as schematic/cache above — the chart's own default
+        # (ghcr.io/siderolabs) is the upstream project's namespace, which a
+        # self-hosted factory has no push credentials for.
+        factory_installer_registry: "${image_factory.registry.schematic.registry ?? 'registry.image-factory.svc.cluster.local:5000'}"
+        factory_installer_repository: "${image_factory.registry.installer.repository ?? 'installer'}"
+        factory_installer_insecure: "${(image_factory.registry.schematic.registry ?? '') == '' ? true : (image_factory.registry.schematic.insecure ?? false)}"
       timeout: 10m
       interval: 5m
     resources:

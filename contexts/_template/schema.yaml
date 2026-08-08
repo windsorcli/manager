@@ -100,12 +100,20 @@ properties:
                 default: false
                 description: Allow HTTP or invalid TLS to the schematic registry.
             additionalProperties: false
+          installer:
+            type: object
+            properties:
+              repository:
+                type: string
+                default: installer
+                description: Repository name the factory pushes built installer images to, on the same registry as schematic.
+            additionalProperties: false
         additionalProperties: false
         description: Registries the factory reads from and writes to.
     additionalProperties: false
     description: Self-hosted Talos image factory
 
-  # How this fleet provisions and manages downstream clusters. See config-provisioning.yaml 
+  # How this fleet provisions and manages downstream clusters. See config-provisioning.yaml
   # for what enabling it turns on.
   provisioning:
     type: object
@@ -115,6 +123,49 @@ properties:
         default: false
         description: Enable the self-hosted Omni management plane and the capabilities it depends on (identity, image factory).
     additionalProperties: false
+
+  # Self-hosted Sidero Omni, the fleet's Talos control plane. See addon-omni.yaml for
+  # the deployment shape (embedded etcd, own TLS, SideroLink, Keycloak SAML).
+  omni:
+    type: object
+    properties:
+      hostname:
+        type: string
+        description: Base hostname Omni's UI/API advertises. Derived as omni.<domain> when unset; the Kubernetes proxy and SideroLink machine API endpoints are derived from this same base (kubernetes.<hostname>, siderolink.<hostname>).
+      account_id:
+        type: string
+        description: UUID for config.account.id. Must not change for the lifetime of the installation. Terraform-generated and held in state when unset.
+      wireguard:
+        type: object
+        properties:
+          service_type:
+            type: string
+            enum:
+              - NodePort
+              - LoadBalancer
+            description: Kubernetes Service type fronting SideroLink's WireGuard port. Defaults to NodePort on docker-desktop and LoadBalancer everywhere else.
+          advertised_endpoint:
+            type: string
+            description: host:port machines dial for SideroLink, overriding the derived hostname/NodePort. Changing this after machines have joined requires re-provisioning them.
+          node_port:
+            type: integer
+            description: NodePort for the WireGuard Service (chart default 30180). Override on a port conflict; also republishes as the docker-desktop hostport.
+        additionalProperties: false
+      persistence_size:
+        type: string
+        default: 16Gi
+        description: Size of the volume backing Omni's embedded etcd, secondary SQLite storage, and machine logs.
+      etcd_encryption_key:
+        type: string
+        sensitive: true
+        description: ASCII-armored GPG private key Omni uses to decrypt its etcd master key (config.storage.default.etcd.privateKeySource). Generate with `(export GNUPGHOME=$(mktemp -d); gpg --batch --passphrase '' --quick-gen-key x; gpg -a --export-secret-key > omni.asc; rm -rf $GNUPGHOME)`. Set via a secret() reference. Required outside dev mode; dev mode falls back to a fixed key checked into the facet.
+      initial_admins:
+        type: array
+        items:
+          type: string
+        description: Emails seeded as admins on Omni's first start (config.auth.initialUsers), before Keycloak SAML group membership grants any role. Bootstrap only, not how production access is granted. The chart refuses to start with none at all — required outside dev mode; dev mode seeds a fixed placeholder. Deliberately no default here — a schema default would be materialized ahead of the facet's own null-coalescing fallback, permanently masking the dev-mode default.
+    additionalProperties: false
+    description: Self-hosted Sidero Omni fleet control plane
 
   # Sibling of Core's location, network_zone, token, and dns_parent_zone.
   hetzner:

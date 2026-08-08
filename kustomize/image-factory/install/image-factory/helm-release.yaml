@@ -41,6 +41,18 @@ spec:
           namespace: ${factory_schematic_namespace:-siderolabs/image-factory}
           repository: ${factory_schematic_repository:-schematics}
           insecure: ${factory_schematic_insecure:-false}
+        # Where the factory pushes the installer images it builds. Unlike schematic
+        # above, the chart's own default here is ghcr.io/siderolabs — the upstream
+        # project's own namespace, which nothing self-hosted has push credentials for.
+        installer:
+          internal:
+            registry: ${factory_installer_registry}
+            # Explicit empty override — the chart's own default namespace here is
+            # "siderolabs", which would otherwise survive since koanf only replaces
+            # keys a config file sets, not ones it omits.
+            namespace: ""
+            repository: ${factory_installer_repository:-installer}
+            insecure: ${factory_installer_insecure:-false}
       cache:
         oci:
           registry: ${factory_cache_registry}

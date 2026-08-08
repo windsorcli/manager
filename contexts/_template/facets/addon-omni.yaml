@@ -1,0 +1,212 @@
+kind: Facet
+apiVersion: blueprints.windsorcli.dev/v1alpha1
+metadata:
+  name: omni
+  description: Self-hosted Sidero Omni — the fleet's Talos control plane
+
+# provisioning.enabled fans identity on by default (config-provisioning.yaml), but an
+# operator's explicit opt-out survives that fan-out — Omni cannot run without an
+# identity provider to authenticate operators against, so it follows suit rather than
+# leaving a dangling dependsOn on identity-resources.
+when: provisioning.enabled == true && identity.enabled != false
+
+requires:
+  - paths:
+      - gateway.enabled
+    message: Omni's UI/API, Kubernetes proxy, and SideroLink machine API are reached over HTTPS through the cluster gateway — enable the gateway.
+  - when: dev != true
+    paths:
+      - omni.etcd_encryption_key
+    message: Omni needs a GPG-armored private key to decrypt its etcd master key. Generate one with `(export GNUPGHOME=$(mktemp -d); gpg --batch --passphrase '' --quick-gen-key x; gpg -a --export-secret-key > omni.asc; rm -rf $GNUPGHOME)` and set omni.etcd_encryption_key via a secret() reference.
+  - when: (omni_effective.wireguard_advertised_endpoint ?? '') == ''
+    paths:
+      - omni.wireguard.advertised_endpoint
+    message: SideroLink's gateway LoadBalancer IP isn't known ahead of a cloud-managed LB controller provisioning it (aws, hetzner, azure). Apply once, then set omni.wireguard.advertised_endpoint to <load-balancer-ip>:30180 and apply again.
+  - when: dev != true
+    paths:
+      - omni.initial_admins
+    message: Omni requires at least one bootstrap admin email in config.auth.initialUsers before it will start. Set omni.initial_admins to a list of operator emails — real access should route through Keycloak SAML group membership once it's set up.
+
+# =============================================================================
+# Terraform — account ID
+# =============================================================================
+# Generated once and held in state. The chart refuses to install without it, and it
+# must stay fixed for the lifetime of the installation, so the module is only applied
+# when the operator supplies no ID.
+terraform:
+
+  - name: omni-account
+    path: ids/omni-account
+    when: (omni.account_id ?? '') == ''
+
+config:
+  # Bare hostnames (no port) for gateway HTTPRoute matching — sibling single-level
+  # subdomains so they fit the gateway's own wildcard certificate SAN (*.<domain>),
+  # the same constraint image-factory's own factory.<domain> route works within.
+  - name: omni_effective
+    value:
+      domain: >-
+        ${(dns.public_domain ?? '') == ''
+          ? (dns.private_domain ?? dns.domain ?? '')
+          : dns.public_domain}
+      hostname: >-
+        ${omni.hostname
+          ?? ('omni.' + ((dns.public_domain ?? '') == ''
+                ? (dns.private_domain ?? dns.domain ?? '')
+                : dns.public_domain))}
+      kube_proxy_hostname: >-
+        ${'omni-kube.' + ((dns.public_domain ?? '') == ''
+              ? (dns.private_domain ?? dns.domain ?? '')
+              : dns.public_domain)}
+      machine_api_hostname: >-
+        ${'omni-siderolink.' + ((dns.public_domain ?? '') == ''
+              ? (dns.private_domain ?? dns.domain ?? '')
+              : dns.public_domain)}
+      # docker-desktop reaches the gateway on 8443 rather than 443 — same port
+      # image-factory's own external URL derivation appends.
+      external_port_suffix: "${workstation.runtime == 'docker-desktop' ? ':8443' : ''}"
+      # NodePort environments (docker-desktop by default) and envoy driver keep the
+      # chart's own dedicated Service (omni/nodeport, omni/loadbalancer). cilium
+      # driver routes through a dedicated Gateway sharing the shared gateway's IP
+      # instead (omni/gateway/wireguard) — see docs/adr/0005 for why not envoy too.
+      wireguard_node_port: "${omni.wireguard.node_port ?? 30180}"
+      # NodePort: derive from the control-plane node's own address (not 127.0.0.1 —
+      # a remote device dials this, docker-desktop's loopback trick doesn't apply).
+      # cilium: the shared gateway's IP is pinned (lbipam.cilium.io/ips), known
+      # without an apply. Everything else (envoy's own dedicated Service, cloud LB
+      # controllers) has no derivable default — dev mode gets a placeholder, others
+      # hit the requires: check below.
+      wireguard_advertised_endpoint: >-
+        ${omni.wireguard.advertised_endpoint
+          ?? (lb_effective.mode == 'nodeport'
+              ? (len(terraform_output('compute', 'controlplanes') ?? []) > 0
+                  ? (split(terraform_output('compute', 'controlplanes')[0].endpoint, ':')[0] + ':' + string(omni.wireguard.node_port ?? 30180))
+                  : (len(values(cluster.controlplanes.nodes ?? {})) > 0
+                      ? (split(values(cluster.controlplanes.nodes)[0].endpoint, ':')[0] + ':' + string(omni.wireguard.node_port ?? 30180))
+                      : (dev == true ? '0.0.0.0:' + string(omni.wireguard.node_port ?? 30180) : '')))
+              : (gateway.driver == 'cilium' && lb_effective.controller_required != true
+                  ? network.loadbalancer_ips.start + ':' + string(omni.wireguard.node_port ?? 30180)
+                  : (dev == true ? '0.0.0.0:' + string(omni.wireguard.node_port ?? 30180) : '')))}
+
+  # docker-desktop only forwards explicitly published container ports, so the
+  # NodePort needs a matching hostport (same-port passthrough). An operator's own
+  # hostports list still wins (raw values merge over facet-computed config last).
+  - name: cluster
+    when: workstation.runtime == 'docker-desktop'
+    value:
+      controlplanes:
+        hostports: >-
+          ${["8080:30080/tcp", "8443:30443/tcp",
+             string(omni.wireguard.node_port ?? 30180) + ":" + string(omni.wireguard.node_port ?? 30180) + "/udp"]}
+      workers:
+        hostports: >-
+          ${["8080:30080/tcp", "8443:30443/tcp",
+             string(omni.wireguard.node_port ?? 30180) + ":" + string(omni.wireguard.node_port ?? 30180) + "/udp"]}
+
+  # Split from the block above so the dev-only key can be a plain literal rather
+  # than an expression string (the expression grammar has no escape for embedded
+  # newlines). Same shape as Core's dev-vs-supplied admin secret: an operator's own
+  # key always wins; the fixed key below only fills in under dev == true.
+  - name: omni_effective
+    when: (omni.etcd_encryption_key ?? '') != ''
+    value:
+      etcd_encryption_key: ${omni.etcd_encryption_key}
+
+  - name: omni_effective
+    when: (omni.etcd_encryption_key ?? '') == '' && dev == true
+    value:
+      etcd_encryption_key: |
+        -----BEGIN PGP PRIVATE KEY BLOCK-----
+
+        lFgEam/o7RYJKwYBBAHaRw8BAQdAvJ9sgNU/mNzzUURBYW6rkxtT4CG3gBGpE+eE
+        Zb2p0doAAQC6a3yRWocfjRbzoj0kbi1Kaf6J2RVYSJIeXIibogXNfw5RtBZvbW5p
+        LWRldkB3aW5kc29yLmxvY2FsiJkEExYKAEEWIQQCFqLg03r7RzBHWbarvUkg+WLH
+        RAUCam/o7QIbAwUJBaOagAULCQgHAgIiAgYVCgkICwIEFgIDAQIeBwIXgAAKCRCr
+        vUkg+WLHRNj1AP9fTur/3Cq1p201dcKiEKTK11f3f94RsM7OL/H5dqS+hAD/Wq85
+        8HRIUTCBxYuHUN/avZsqNrgKJp+kQ3Jn7zsacwCcXQRqb+jtEgorBgEEAZdVAQUB
+        AQdABe+v5DT6Lecck95BrSJPhgjTkvm+cusXbfcF5Sj4pzkDAQgHAAD/aD9EB6jX
+        l0czZpI3Z/4giLs+zY5F3fl1MVx3uXAJZugQJYh4BBgWCgAgFiEEAhai4NN6+0cw
+        R1m2q71JIPlix0QFAmpv6O0CGwwACgkQq71JIPlix0Tq9QEA/56y3LK4fPcMtSML
+        jyCiP+FVoAB7rXpg+V0ATF/PAQ4BAKf6DkIvk2L2r2u3x/F0ARkZZTnSwBX84lY2
+        /YJzgncL
+        =ujZb
+        -----END PGP PRIVATE KEY BLOCK-----
+
+# =============================================================================
+# Flux system — Omni
+# =============================================================================
+# identity-resources because Omni's SAML config points at the platform realm's
+# descriptor at startup, and the omni/saml-client Job registers Omni as a client of
+# that same realm over the admin REST API.
+#
+# Conditional components:
+#   - omni/prometheus: metrics Service and ServiceMonitor.
+#
+flux:
+
+  - name: omni
+    dependsOn:
+      - identity-resources
+    secrets:
+      omni-etcd-encryption-key:
+        data:
+          omni.asc: ${omni_effective.etcd_encryption_key}
+    install:
+      components:
+        - omni
+        - omni/saml-client
+        - "${(telemetry.metrics.enabled ?? false) == true ? 'omni/prometheus' : ''}"
+        - "${lb_effective.mode == 'nodeport' ? 'omni/nodeport' : ''}"
+        - "${lb_effective.mode != 'nodeport' && gateway.driver != 'cilium' ? 'omni/loadbalancer' : ''}"
+      substitutions:
+        omni_account_id: "${omni.account_id ?? terraform_output('omni-account', 'id')}"
+        omni_hostname: "${omni_effective.hostname}${omni_effective.external_port_suffix}"
+        omni_kube_proxy_hostname: "${omni_effective.kube_proxy_hostname}${omni_effective.external_port_suffix}"
+        omni_machine_api_hostname: "${omni_effective.machine_api_hostname}${omni_effective.external_port_suffix}"
+        omni_persistence_size: "${omni.persistence_size ?? '16Gi'}"
+        omni_persistence_storage_class: "${cluster.storage.class ?? 'single'}"
+        # config.registries.imageFactoryBaseURL. This one value serves two
+        # purposes in Omni's own client (client/pkg/imagefactory/client.go): its
+        # own reconciliation calls, and the download links it hands back to an
+        # operator's browser — so it has to be the external, browser-reachable
+        # URL, not the in-cluster Service. Falls back to Manager's own image
+        # factory when it's enabled, else the chart's public default.
+        omni_image_factory_url: "${image_factory.external_url ?? (image_factory.enabled == true ? ('https://factory.' + omni_effective.domain + omni_effective.external_port_suffix) : 'https://factory.talos.dev')}"
+        # The chart refuses to start with zero initial users. dev mode seeds
+        # Core's own dev admin (keycloak/realm/dev-user), so a SAML login with
+        # that same identity is recognized immediately — not a separate,
+        # unrelated placeholder identity.
+        omni_initial_admins: "${omni.initial_admins ?? (dev == true ? ['admin@local.test'] : [])}"
+        omni_wireguard_node_port: "${omni_effective.wireguard_node_port}"
+        omni_wireguard_advertised_endpoint: "${omni_effective.wireguard_advertised_endpoint}"
+        # The chart fetches this itself, server-side, so the internal (backchannel)
+        # descriptor URL avoids depending on the gateway route being reachable.
+        keycloak_saml_url: "${identity_effective.backchannel_issuer}/protocol/saml/descriptor"
+        keycloak_realm: "${identity_effective.realm}"
+        keycloak_admin_secret: "${(identity_effective.admin_password ?? '') != '' ? 'keycloak-bootstrap-admin' : 'keycloak-initial-admin'}"
+        # crewjam/saml (Omni's SAML library) has no configured EntityID, so it
+        # falls back to its own metadata URL as the issuer — not the bare root
+        # URL — per samlsp.DefaultServiceProvider (samlsp/new.go): metadataURL :=
+        # opts.URL.ResolveReference(&url.URL{Path: "saml/metadata"}).
+        omni_saml_entity_id: "https://${omni_effective.hostname}${omni_effective.external_port_suffix}/saml/metadata"
+        omni_saml_acs_url: "https://${omni_effective.hostname}${omni_effective.external_port_suffix}/saml/acs"
+      timeout: 10m
+      interval: 5m
+    resources:
+      - dependsOn:
+          - gateway-resources
+        components:
+          - omni/gateway
+          # A dedicated Gateway sharing the shared one's external IP (Cilium's
+          # lbipam.cilium.io/sharing-key), not a listener added to the shared Gateway
+          # itself — that would need two Kustomizations both applying the same
+          # object under Flux's one global field-manager identity. envoy driver
+          # keeps the dedicated NodePort/LoadBalancer Service (omni/nodeport) for
+          # now; see docs/adr/0005.
+          - "${gateway.driver == 'cilium' && lb_effective.mode != 'nodeport' ? 'omni/gateway/wireguard' : ''}"
+        substitutions:
+          external_domain: "${omni_effective.domain}"
+          loadbalancer_start_ip: "${network.loadbalancer_ips.start}"
+          omni_wireguard_node_port: "${omni_effective.wireguard_node_port}"
+        timeout: 10m
+        interval: 5m

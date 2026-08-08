@@ -1,0 +1,183 @@
+# Registers the omni SAML client in Core's platform realm over the admin REST API.
+# Creates it if it doesn't already exist; does not manage drift on fields changed by
+# hand afterward. Runs in the omni namespace and reads the bootstrap admin credential
+# cross-namespace via the Role/RoleBinding below, since system-identity is policy-
+# managed by Core. Writes nothing back to Kubernetes — SAML has no client secret, and
+# Omni fetches Keycloak's IdP metadata directly over the public SAML descriptor
+# endpoint.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: keycloak-omni-saml-client
+  namespace: omni
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: keycloak-omni-saml-client
+  namespace: system-identity
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames: ["${keycloak_admin_secret}"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: keycloak-omni-saml-client
+  namespace: system-identity
+subjects:
+  - kind: ServiceAccount
+    name: keycloak-omni-saml-client
+    namespace: omni
+roleRef:
+  kind: Role
+  name: keycloak-omni-saml-client
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: keycloak-omni-saml-client
+  namespace: omni
+  annotations:
+    kustomize.toolkit.fluxcd.io/force: enabled
+spec:
+  backoffLimit: 10
+  ttlSecondsAfterFinished: 86400
+  activeDeadlineSeconds: 900
+  template:
+    spec:
+      restartPolicy: Never
+      serviceAccountName: keycloak-omni-saml-client
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+      volumes:
+        - name: work
+          emptyDir:
+            medium: Memory
+            sizeLimit: 1Mi
+      containers:
+        - name: register-client
+          # renovate: datasource=docker depName=kubectl package=alpine/k8s
+          image: alpine/k8s:1.36.2@sha256:44ef4942e171939b9c665a4a84beb80e2dcdb9a24330d4651cfdfd2e9deecc47
+          volumeMounts:
+            - name: work
+              mountPath: /work
+          env:
+            - name: HOME
+              value: /work
+            - name: TMPDIR
+              value: /work
+          # $${...} are shell variables; ${...} are Windsor substitutions.
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -euo pipefail
+              umask 077
+              KC="http://keycloak-service.system-identity:8080"
+              REALM="${keycloak_realm}"
+              ENTITY_ID="${omni_saml_entity_id}"
+              ACS_URL="${omni_saml_acs_url}"
+              # secretKeyRef only resolves same-namespace; the admin secret lives in
+              # system-identity, so fetch it via the RBAC Role granted above instead.
+              ADMIN_USER=$(kubectl get secret ${keycloak_admin_secret} -n system-identity -o jsonpath='{.data.username}' | base64 -d)
+              kubectl get secret ${keycloak_admin_secret} -n system-identity -o jsonpath='{.data.password}' | base64 -d > /work/pw
+              i=0
+              while :; do
+                token=$(curl -sf --connect-timeout 5 --max-time 15 \
+                  --data-urlencode "client_id=admin-cli" \
+                  --data-urlencode "username=$${ADMIN_USER}" \
+                  --data-urlencode "password@/work/pw" \
+                  --data-urlencode "grant_type=password" \
+                  "$${KC}/realms/master/protocol/openid-connect/token" 2>/dev/null \
+                  | jq -r '.access_token // empty') || true
+                if [ -n "$${token}" ]; then break; fi
+                i=$$((i + 1))
+                if [ "$${i}" -ge 60 ]; then
+                  echo "timed out authenticating to the keycloak admin api" >&2
+                  exit 1
+                fi
+                sleep 5
+              done
+              printf 'Authorization: Bearer %s' "$${token}" > /work/hdr
+              # clientId is the SP's real entity ID (a full URL), so it must be
+              # query-string encoded — the client is created under this same
+              # value below, not a bare name.
+              cid=$(curl -sf --connect-timeout 5 --max-time 15 -H @/work/hdr -G \
+                --data-urlencode "clientId=$${ENTITY_ID}" \
+                "$${KC}/admin/realms/$${REALM}/clients" \
+                | jq -r '.[0].id // empty')
+              if [ -n "$${cid}" ]; then
+                echo "omni saml client already registered ($${cid})"
+                exit 0
+              fi
+              # Omni's identity extraction (LocateUserInfo in
+              # internal/backend/saml/session.go) ignores the SAML NameID
+              # entirely except for Google's IdP, so the omni-email mapper below
+              # is required: without it every login fails with "cannot find
+              # user identity in the assertion" despite the nameIDFormat above.
+              jq -n --arg entity_id "$${ENTITY_ID}" --arg acs_url "$${ACS_URL}" '{
+                clientId: $entity_id,
+                protocol: "saml",
+                enabled: true,
+                redirectUris: [$acs_url],
+                attributes: {
+                  "saml.assertion.signature": "true",
+                  "saml.client.signature": "false",
+                  saml_force_name_id_format: "true",
+                  saml_name_id_format: "email"
+                },
+                protocolMappers: [
+                  {
+                    name: "omni-role",
+                    protocol: "saml",
+                    protocolMapper: "saml-group-membership-mapper",
+                    config: {
+                      "attribute.name": "saml.omni.sidero.dev/role",
+                      "attribute.nameformat": "Basic",
+                      "full.path": "false"
+                    }
+                  },
+                  {
+                    name: "omni-email",
+                    protocol: "saml",
+                    protocolMapper: "saml-user-property-mapper",
+                    config: {
+                      "user.attribute": "email",
+                      "attribute.name": "email",
+                      "attribute.nameformat": "Basic",
+                      "friendly.name": "email"
+                    }
+                  }
+                ]
+              }' > /work/client.json
+              http_code=$(curl -s -o /work/create-response -w '%{http_code}' \
+                --connect-timeout 5 --max-time 15 -H @/work/hdr \
+                -H "Content-Type: application/json" \
+                -d @/work/client.json \
+                "$${KC}/admin/realms/$${REALM}/clients")
+              if [ "$${http_code}" -lt 200 ] || [ "$${http_code}" -ge 300 ]; then
+                echo "failed to create omni saml client (HTTP $${http_code}):" >&2
+                cat /work/create-response >&2
+                exit 1
+              fi
+              echo "registered omni saml client"
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              cpu: 200m
+              memory: 64Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+            seccompProfile:
+              type: RuntimeDefault
