@@ -28,18 +28,33 @@ x-defaults:
         - /var/mnt/local
 
 cases:
-  # telemetry.metrics.enabled defaults true (Core's own default), so the Kustomization
-  # exists even with nothing contributing to it yet.
+  # telemetry.metrics.enabled is opt-in — Core's own telemetry-install Kustomization
+  # gates on a bare check (platform-base.yaml), not a `?? true` default, despite one
+  # existing elsewhere in Core for an unrelated computed value. Match Core's real
+  # behavior, not its inconsistent-looking default.
   - name: creates the domain when metrics are enabled
     values:
       platform: metal
       network: *default-network
       cluster: *default-cluster
+      telemetry:
+        metrics:
+          enabled: true
     expect:
       flux:
         - name: manager-observability
           dependsOn:
             - telemetry-install
+
+  # The actual CI failure this locks in: telemetry.metrics unset (not explicitly
+  # false) must exclude the domain too, since telemetry-install itself won't exist.
+  - name: excludes the domain when metrics are unset
+    values:
+      platform: metal
+      network: *default-network
+      cluster: *default-cluster
+    expect:
+      flux: []
 
   - name: excludes the domain when metrics are disabled
     values:

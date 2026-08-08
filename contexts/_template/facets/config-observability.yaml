@@ -19,7 +19,7 @@ metadata:
 flux:
   - name: manager-observability
     path: observability
-    when: (telemetry.metrics.enabled ?? true) == true
+    when: telemetry.metrics.enabled == true
     dependsOn:
       - telemetry-install
     resources:
