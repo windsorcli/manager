@@ -21,7 +21,7 @@ requires:
   - when: (omni_effective.wireguard_advertised_endpoint ?? '') == ''
     paths:
       - omni.wireguard.advertised_endpoint
-    message: SideroLink's advertised endpoint can't be derived for a LoadBalancer Service — its external IP doesn't exist until the Service is created. Apply once, then set omni.wireguard.advertised_endpoint to <load-balancer-ip>:50180 and apply again.
+    message: SideroLink's gateway LoadBalancer IP isn't known ahead of a cloud-managed LB controller provisioning it (aws, hetzner, azure). Apply once, then set omni.wireguard.advertised_endpoint to <load-balancer-ip>:30180 and apply again.
   - when: dev != true
     paths:
       - omni.initial_admins
@@ -65,58 +65,35 @@ config:
       # docker-desktop reaches the gateway on 8443 rather than 443 — same port
       # image-factory's own external URL derivation appends.
       external_port_suffix: "${workstation.runtime == 'docker-desktop' ? ':8443' : ''}"
-      # NodePort where no cloud load balancer exists; LoadBalancer everywhere else —
-      # same split option-gateway.yaml uses for its own redirect port.
-      wireguard_service_type: "${omni.wireguard.service_type ?? (workstation.runtime == 'docker-desktop' ? 'NodePort' : 'LoadBalancer')}"
-      # The chart's own default (siderolabs/omni service.wireguard.nodePort). Operator-
-      # configurable for port conflicts; also threaded into the docker-desktop hostport
-      # publish below so the two stay in sync.
+      # NodePort environments (docker-desktop by default) keep the chart's own
+      # dedicated Service (omni/nodeport component). Everywhere else routes through
+      # the shared gateway instead (omni/gateway/wireguard component: a UDP listener
+      # + UDPRoute), same pattern as Core's CoreDNS add-on.
+      # Also the gateway listener/Service port in the gateway-routed case.
       wireguard_node_port: "${omni.wireguard.node_port ?? 30180}"
-      # NodePort topologies can derive host:port from the first control-plane node's
-      # own address — terraform_output("compute", "controlplanes") where a compute
-      # module provisions it, else cluster.controlplanes.nodes directly (metal has no
-      # compute module; nodes are operator-supplied), the same fallback chain
-      # platform-docker.yaml uses for its own controlplanes value — plus the chart's
-      # default NodePort. A LoadBalancer's external IP doesn't exist until the Service
-      # is created, so that topology has no derived default — the operator sets
-      # omni.wireguard.advertised_endpoint once it's known.
+      # NodePort: derive from the control-plane node's own address (not 127.0.0.1 —
+      # a remote device dials this, docker-desktop's loopback trick doesn't apply).
+      # LoadBalancer: the gateway's own address is pinned (lbipam.cilium.io/ips /
+      # envoy's loadBalancerIP), known without an apply. Cloud-managed LB
+      # controllers are the exception — dev mode gets a placeholder, others hit the
+      # requires: check below.
       wireguard_advertised_endpoint: >-
         ${omni.wireguard.advertised_endpoint
-          ?? ((omni.wireguard.service_type ?? (workstation.runtime == 'docker-desktop' ? 'NodePort' : 'LoadBalancer')) == 'NodePort'
+          ?? (lb_effective.mode == 'nodeport'
               ? (len(terraform_output('compute', 'controlplanes') ?? []) > 0
                   ? (split(terraform_output('compute', 'controlplanes')[0].endpoint, ':')[0] + ':' + string(omni.wireguard.node_port ?? 30180))
                   : (len(values(cluster.controlplanes.nodes ?? {})) > 0
                       ? (split(values(cluster.controlplanes.nodes)[0].endpoint, ':')[0] + ':' + string(omni.wireguard.node_port ?? 30180))
-                      : ''))
-              : '')}
+                      : (dev == true ? '0.0.0.0:' + string(omni.wireguard.node_port ?? 30180) : '')))
+              : ((lb_effective.enabled == true || (gateway.driver == 'cilium' && lb_effective.controller_required != true))
+                  ? network.loadbalancer_ips.start + ':' + string(omni.wireguard.node_port ?? 30180)
+                  : (dev == true ? '0.0.0.0:' + string(omni.wireguard.node_port ?? 30180) : '')))}
 
-  # docker-desktop's VM networking only forwards explicitly published container ports —
-  # unlike a real node, the container's NodePort isn't otherwise host-reachable. Without
-  # this, wireguard_advertised_endpoint above points at a host:port nothing is listening
-  # on. Same-port passthrough (host == container) so it matches the endpoint derivation
-  # without threading the node_port override through twice.
-  #
-  # Reads omni.wireguard.* directly rather than omni_effective — omni_effective's own
-  # endpoint derivation falls back to reading cluster.controlplanes.nodes, so depending
-  # on omni_effective here would make `cluster` and `omni_effective` reference each
-  # other, which the composer rejects as circular. Repeats the small NodePort-vs-
-  # LoadBalancer default inline instead; this block's own `when` already pins
-  # docker-desktop, so the nested default collapses to NodePort.
-  #
-  # Set unconditionally rather than `cluster.controlplanes.hostports ?? [...]` — reading
-  # the same path this block writes is its own self-reference. An operator's own
-  # values.yaml still wins: raw (undefaulted) values merge over facet-computed config
-  # last each round, the same precedence the identity/image_factory fan-out above relies
-  # on — so this only takes over when the operator hasn't set the hostports list
-  # themselves. A supplied list takes over the gateway's default pair too, same as it
-  # always has.
-  #
-  # A NodePort is reachable via any cluster node regardless of which one backs the
-  # Service, so publishing on controlplanes alone is already sufficient — but published
-  # on workers too for consistency, matching option-workstation.yaml's own symmetric
-  # default for the gateway's ports.
+  # docker-desktop only forwards explicitly published container ports, so the
+  # NodePort needs a matching hostport (same-port passthrough). An operator's own
+  # hostports list still wins (raw values merge over facet-computed config last).
   - name: cluster
-    when: workstation.runtime == 'docker-desktop' && (omni.wireguard.service_type ?? 'NodePort') == 'NodePort'
+    when: workstation.runtime == 'docker-desktop'
     value:
       controlplanes:
         hostports: >-
@@ -180,6 +157,7 @@ flux:
         - omni
         - omni/saml-client
         - "${(telemetry.metrics.enabled ?? false) == true ? 'omni/prometheus' : ''}"
+        - "${lb_effective.mode == 'nodeport' ? 'omni/nodeport' : ''}"
       substitutions:
         omni_account_id: "${omni.account_id ?? terraform_output('omni-account', 'id')}"
         omni_hostname: "${omni_effective.hostname}${omni_effective.external_port_suffix}"
@@ -199,7 +177,6 @@ flux:
         # that same identity is recognized immediately — not a separate,
         # unrelated placeholder identity.
         omni_initial_admins: "${omni.initial_admins ?? (dev == true ? ['admin@local.test'] : [])}"
-        omni_wireguard_service_type: "${omni_effective.wireguard_service_type}"
         omni_wireguard_node_port: "${omni_effective.wireguard_node_port}"
         omni_wireguard_advertised_endpoint: "${omni_effective.wireguard_advertised_endpoint}"
         # The chart fetches this itself, server-side, so the internal (backchannel)
@@ -220,7 +197,9 @@ flux:
           - gateway-resources
         components:
           - omni/gateway
+          - "${lb_effective.mode != 'nodeport' ? 'omni/gateway/wireguard' : ''}"
         substitutions:
           external_domain: "${omni_effective.domain}"
+          omni_wireguard_node_port: "${omni_effective.wireguard_node_port}"
         timeout: 10m
         interval: 5m

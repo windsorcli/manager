@@ -1,0 +1,17 @@
+# Routes SideroLink WireGuard traffic to omni's Service (ClusterIP — helm-release.yaml)
+# through the wireguard-udp gateway listener. v1, not v1alpha2: both are served by the
+# installed CRD, but v1alpha2 is deprecated.
+apiVersion: gateway.networking.k8s.io/v1
+kind: UDPRoute
+metadata:
+  name: omni-wireguard
+  namespace: omni
+spec:
+  parentRefs:
+    - name: external
+      namespace: system-gateway
+      sectionName: wireguard-udp
+  rules:
+    - backendRefs:
+        - name: omni-wireguard
+          port: ${omni_wireguard_node_port}

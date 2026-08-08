@@ -262,6 +262,70 @@ cases:
               # with that identity is recognized immediately.
               omni_initial_admins: "[admin@local.test]"
 
+  # A cloud-managed LoadBalancer controller's external IP is unknowable before the
+  # Service exists (aws here; hetzner/azure are the same shape), so outside dev mode
+  # this is a genuine two-phase "apply once, then set the real IP" operator step (see
+  # the earlier explicit-override test). Under dev == true a placeholder fills in
+  # instead — colima, CI, and any other dev context converge without it, since
+  # nothing dev mode drives ever reads the value back. Local/on-prem LB platforms
+  # (the next test) don't need this at all — their address derives statically.
+  - name: dev mode supplies a placeholder wireguard advertised endpoint
+    values:
+      dev: true
+      platform: aws
+      aws:
+        region: us-west-2
+      network: *default-network
+      cluster: *default-cluster
+      dns:
+        private_domain: cluster.local
+      identity:
+        enabled: true
+      provisioning:
+        enabled: true
+    expect:
+      flux:
+        - name: omni
+          install:
+            substitutions:
+              omni_wireguard_advertised_endpoint: "0.0.0.0:30180"
+
+  # Local/on-prem LoadBalancer platforms don't need dev mode or an operator override
+  # at all: the gateway's own address (network.loadbalancer_ips.start) is pinned via
+  # a static annotation (lbipam.cilium.io/ips or envoy's loadBalancerIP), known at
+  # blueprint-compose time — no "apply once, then set the real IP" dance. Routes
+  # through the shared gateway (omni/gateway/wireguard), not a dedicated Service.
+  - name: derives the wireguard endpoint through the gateway on a local LoadBalancer
+    values:
+      platform: metal
+      network: *default-network
+      cluster: *default-cluster
+      dns:
+        private_domain: cluster.local
+      identity:
+        enabled: true
+      provisioning:
+        enabled: true
+      omni:
+        etcd_encryption_key: |
+          -----BEGIN PGP PRIVATE KEY BLOCK-----
+          dGVzdC1rZXktbWF0ZXJpYWw=
+          -----END PGP PRIVATE KEY BLOCK-----
+        initial_admins:
+          - admin@example.com
+    expect:
+      flux:
+        - name: omni
+          install:
+            substitutions:
+              omni_wireguard_advertised_endpoint: "10.5.1.10:30180"
+          resources:
+            - dependsOn:
+                - gateway-resources
+              components:
+                - omni/gateway
+                - omni/gateway/wireguard
+
   # docker-desktop defaults SideroLink to NodePort, so the advertised endpoint derives
   # from the first control-plane's own node IP and the chart's default NodePort — no
   # operator override needed.
@@ -297,9 +361,17 @@ cases:
       flux:
         - name: omni
           install:
+            components:
+              - omni
+              - omni/saml-client
+              - omni/nodeport
             substitutions:
-              omni_wireguard_service_type: NodePort
               omni_wireguard_advertised_endpoint: 10.5.0.10:30180
+          resources:
+            - dependsOn:
+                - gateway-resources
+              components:
+                - omni/gateway
       config:
         cluster:
           controlplanes:

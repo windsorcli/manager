@@ -1,0 +1,19 @@
+# Adds a UDP listener to Core's shared external Gateway for SideroLink's WireGuard
+# tunnel. A standalone partial resource, not a kustomize patch — the Gateway lives in
+# Core's own Kustomization, so this relies on server-side apply merging it in
+# (spec.listeners is an SSA-associative list keyed by name; verified live).
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: external
+  namespace: system-gateway
+spec:
+  listeners:
+    - name: wireguard-udp
+      protocol: UDP
+      port: ${omni_wireguard_node_port}
+      allowedRoutes:
+        namespaces:
+          from: All
+        kinds:
+          - kind: UDPRoute

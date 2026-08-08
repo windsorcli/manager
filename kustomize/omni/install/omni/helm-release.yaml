@@ -85,14 +85,13 @@ spec:
       enabled: true
       storageClassName: ${omni_persistence_storage_class}
       size: ${omni_persistence_size}
-    # main and k8sProxy stay ClusterIP (chart default) — the gateway reaches them
-    # internally. wireguard is the one Service that needs external exposure of its
-    # own, the same NodePort/LoadBalancer split CoreDNS's own loadbalancer
-    # component uses for its UDP traffic.
+    # main and k8sProxy stay ClusterIP (chart default). wireguard also routes through
+    # the shared gateway now (omni/gateway/wireguard component) rather than its own
+    # NodePort/LoadBalancer Service — port matches the gateway listener/UDPRoute.
     service:
       wireguard:
-        type: ${omni_wireguard_service_type}
-        nodePort: ${omni_wireguard_node_port}
+        type: ClusterIP
+        port: ${omni_wireguard_node_port}
     resources:
       requests:
         cpu: 500m
