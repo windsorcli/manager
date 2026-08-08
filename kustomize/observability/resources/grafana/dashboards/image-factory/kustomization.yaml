@@ -1,0 +1,34 @@
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+
+# Hand-authored, not vendored: no upstream image-factory Grafana dashboard exists
+# (checked grafana.com and the siderolabs/image-factory repo -- neither publish one).
+# Panels are built from the factory's own native /metrics -- image_factory_assets_built_total,
+# image_factory_assets_built_bytes_total, image_factory_assets_cached_errors_total,
+# image_factory_assets_build_latency_seconds, image_factory_assets_concurrency_latency_seconds,
+# image_factory_schematic_cache_size/create_total/duplicate_create_total/get_total,
+# http_request_duration_seconds -- the same metrics prometheus/alerts/image-factory's
+# PrometheusRule alerts on, verified live against a running instance. Requires only
+# image-factory/prometheus (telemetry.metrics.enabled), same as the alerts.
+#
+# namespace: system-observability, not image-factory -- same reasoning as
+# grafana/dashboards/omni: the kiwigrid/k8s-sidecar Grafana runs is scoped to its own
+# namespace, not cluster-wide.
+#
+# image-factory-overview-dashboard.json's every ${datasource} is escaped to
+# $${datasource} -- Flux's postBuild substitution walks every resource in this
+# Kustomization and fails strict-mode on any ${...} it doesn't recognize, and
+# Grafana's own templating variable isn't one of Flux's. Same convention
+# grafana/dashboards/omni uses.
+
+configMapGenerator:
+  - name: grafana-dashboard-image-factory
+    namespace: system-observability
+    files:
+      - image-factory-overview-dashboard.json
+    options:
+      disableNameSuffixHash: true
+      labels:
+        grafana_dashboard: "1"
+      annotations:
+        grafana_folder: "Image Factory"

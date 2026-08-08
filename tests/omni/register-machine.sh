@@ -124,17 +124,18 @@ esac
 CLIENT_VERSION=$(talosctl version --client 2>/dev/null | awk '/Tag:/{print $2}')
 TALOS_VERSION="${TALOS_VERSION:-${CLIENT_VERSION#v}}"
 
-# aqua's talosctl is a version-dispatching proxy; under sudo its internal lookup of
-# the real binary can land on a stale one via secure_path. Resolve to the real
-# pinned binary directly to avoid that.
-if command -v aqua >/dev/null 2>&1 && aqua which talosctl >/dev/null 2>&1; then
-  TALOSCTL=$(aqua which talosctl)
-else
-  TALOSCTL=$(command -v talosctl)
+# Resolve the real, version-pinned talosctl binary rather than the aqua shim on $PATH:
+# sudo doesn't reliably re-resolve the shim (or the $PATH it needs to find its own
+# loadbalancer-launch subprocess), which surfaces as the qemu provisioner failing to
+# initialize under sudo even though it works fine unprivileged.
+if command -v aqua >/dev/null 2>&1; then
+  TALOSCTL=$(aqua which talosctl 2>/dev/null)
 fi
+TALOSCTL="${TALOSCTL:-$(command -v talosctl)}"
+TALOSCTL_DIR=$(dirname "$TALOSCTL")
 
 sudo_talosctl() {
-  sudo -E "$TALOSCTL" "$@"
+  sudo -E env PATH="${TALOSCTL_DIR}:${PATH}" "$TALOSCTL" "$@"
 }
 
 cleanup_all() {
@@ -157,6 +158,17 @@ if [ ! -f "$JOIN_CONFIG" ]; then
     echo "  its path with --join-config (or leave it at the default Downloads location)." >&2
   fi
   exit 1
+fi
+
+# Join tokens are invalidated by an Omni cluster recreate/restart (rotates alongside the
+# Private CA), which a downloaded config file's mtime can't detect on its own - just warn,
+# since the actual rejection is caught later once the VM is up (see the handshake wait below).
+JOIN_CONFIG_MTIME=$(stat -f %m "$JOIN_CONFIG" 2>/dev/null || stat -c %Y "$JOIN_CONFIG")
+JOIN_CONFIG_AGE_S=$(( $(date +%s) - JOIN_CONFIG_MTIME ))
+if [ "$JOIN_CONFIG_AGE_S" -gt 1800 ]; then
+  echo "warning: ${JOIN_CONFIG} is $((JOIN_CONFIG_AGE_S / 60)) minutes old - if Omni has" >&2
+  echo "  restarted since it was downloaded, its join token is likely invalid. Re-download" >&2
+  echo "  from Omni's Home page (\"Download Machine Join Config\") if the join fails below." >&2
 fi
 
 # --- fetch/cache a Talos ISO -------------------------------------------------------------
@@ -265,13 +277,35 @@ echo "==> pushing the join config"
 CONSOLE_LOG="${HOME}/.talos/clusters/${NAME}/${NAME}-controlplane-1.log"
 echo "==> waiting for the SideroLink handshake"
 joined=0
+rejected=0
 for _ in $(seq 1 20); do
   if grep -q "reconfigured wireguard link" "$CONSOLE_LOG" 2>/dev/null; then
     joined=1
     break
   fi
+  # PermissionDenied here means Omni rejected the join token outright - it's a terminal
+  # failure, not a timing fluke, and will never resolve by waiting out the rest of the loop.
+  if grep -q "siderolink.ManagerController.*PermissionDenied" "$CONSOLE_LOG" 2>/dev/null; then
+    rejected=1
+    break
+  fi
   sleep 3
 done
+
+if [ "$rejected" = 1 ]; then
+  cat <<EOF >&2
+
+error: Omni rejected the join token (PermissionDenied) - "${JOIN_CONFIG}" is stale, most
+  likely because Omni has restarted (redeployed, cluster recreate) since it was downloaded,
+  which rotates the join token. Re-download it from Omni's Home page ("Download Machine
+  Join Config"), then re-run:
+    tests/omni/register-machine.sh --clean
+    tests/omni/register-machine.sh --join-config "${JOIN_CONFIG}"
+
+Console log:  ${CONSOLE_LOG}
+EOF
+  exit 1
+fi
 
 cat <<EOF
 

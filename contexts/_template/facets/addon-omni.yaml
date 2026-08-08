@@ -141,6 +141,13 @@ config:
 #
 # Conditional components:
 #   - omni/prometheus: metrics Service and ServiceMonitor.
+#   - omni/exporter: omni_exporter Deployment (siderolabs/omni_exporter), off until
+#     omni.service_account_key is set — nothing here can create that key. It's a
+#     Reader-role service account, an admin creates by hand after first login
+#     (`omnictl serviceaccount create --use-user-role=false --role=Reader
+#     omni-exporter`) and hands to Windsor via a secret() reference. Everything past
+#     that point — the Deployment, the Secret, the ServiceMonitor — is ordinary Manager
+#     automation; only the key itself is unautomatable.
 #
 flux:
 
@@ -151,6 +158,11 @@ flux:
       omni-etcd-encryption-key:
         data:
           omni.asc: ${omni_effective.etcd_encryption_key}
+      # Empty unless omni.service_account_key is set — harmless either way, since
+      # omni/exporter (the only consumer) is excluded from components in that case too.
+      omni-service-account-key:
+        data:
+          key: ${omni.service_account_key ?? ''}
     install:
       components:
         - omni
@@ -158,6 +170,7 @@ flux:
         - "${(telemetry.metrics.enabled ?? false) == true ? 'omni/prometheus' : ''}"
         - "${lb_effective.mode == 'nodeport' ? 'omni/nodeport' : ''}"
         - "${lb_effective.mode != 'nodeport' && gateway.driver != 'cilium' ? 'omni/loadbalancer' : ''}"
+        - "${(telemetry.metrics.enabled ?? false) == true && (omni.service_account_key ?? '') != '' ? 'omni/exporter' : ''}"
       substitutions:
         omni_account_id: "${omni.account_id ?? terraform_output('omni-account', 'id')}"
         omni_hostname: "${omni_effective.hostname}${omni_effective.external_port_suffix}"
@@ -209,4 +222,18 @@ flux:
           loadbalancer_start_ip: "${network.loadbalancer_ips.start}"
           omni_wireguard_node_port: "${omni_effective.wireguard_node_port}"
         timeout: 10m
+        interval: 5m
+
+  # Contributes into config-observability.yaml's manager-observability Kustomization
+  # rather than owning its own — see that facet's comment for why (name collision
+  # risk with Core's own observability/telemetry). Neither needs omni/exporter: both
+  # work from Omni's native metrics alone, which telemetry.metrics.enabled already
+  # scrapes.
+  - name: manager-observability
+    when: (telemetry.metrics.enabled ?? false) == true
+    resources:
+      - components:
+          - prometheus/alerts/omni
+          - grafana/dashboards/omni
+        timeout: 5m
         interval: 5m

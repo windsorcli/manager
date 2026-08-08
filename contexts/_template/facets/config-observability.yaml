@@ -1,0 +1,27 @@
+kind: Facet
+apiVersion: blueprints.windsorcli.dev/v1alpha1
+metadata:
+  name: observability
+  description: Manager-authored Grafana dashboards and Prometheus alert rules for fleet addons, layered on Core's telemetry install
+
+# Flux entry name is manager-observability, not observability or telemetry: those
+# names are Core's own — a Manager facet contributing to either merges directly into
+# Core's real Kustomization (source: core) and its components would resolve against
+# Core's own kustomize tree, not Manager's, and silently fail. Verified via
+# `windsor show blueprint` before picking this name. The kustomize directory is still
+# named observability/ (path: below) — it's the Flux Kustomization *name* that
+# collides across sources, not the path, and the directory name is what operators
+# actually read.
+#
+# See addon-omni.yaml for the omni-specific contributions (prometheus/alerts/omni,
+# grafana/dashboards/omni) — this facet only establishes the Kustomization itself;
+# empty here on its own.
+flux:
+  - name: manager-observability
+    path: observability
+    when: telemetry.metrics.enabled == true
+    dependsOn:
+      - telemetry-install
+    resources:
+      - timeout: 5m
+        interval: 5m

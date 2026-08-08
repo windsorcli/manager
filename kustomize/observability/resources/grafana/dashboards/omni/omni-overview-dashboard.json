@@ -1,0 +1,236 @@
+{
+  "title": "Omni / Overview",
+  "uid": "omni-overview",
+  "tags": ["omni"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "refresh": "30s",
+  "time": { "from": "now-6h", "to": "now" },
+  "templating": {
+    "list": [
+      {
+        "current": { "selected": true, "text": "Prometheus", "value": "prometheus" },
+        "hide": 0,
+        "includeAll": false,
+        "label": "Datasource",
+        "multi": false,
+        "name": "datasource",
+        "options": [],
+        "query": "prometheus",
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false,
+        "type": "datasource"
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Omni",
+      "gridPos": { "x": 0, "y": 0, "w": 6, "h": 4 },
+      "datasource": { "type": "prometheus", "uid": "$${datasource}" },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "$${datasource}" }, "expr": "max(up{job=\"omni-metrics\"})", "refId": "A" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            { "type": "value", "options": { "0": { "text": "DOWN", "color": "red" }, "1": { "text": "UP", "color": "green" } } }
+          ],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 1 }] }
+        }
+      },
+      "options": { "colorMode": "background", "graphMode": "none", "textMode": "value" }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Machines",
+      "gridPos": { "x": 6, "y": 0, "w": 6, "h": 4 },
+      "datasource": { "type": "prometheus", "uid": "$${datasource}" },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "$${datasource}" }, "expr": "sum(omni_machines)", "refId": "A" }
+      ],
+      "options": { "colorMode": "value", "graphMode": "none", "textMode": "value" }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Connected Machines",
+      "gridPos": { "x": 12, "y": 0, "w": 6, "h": 4 },
+      "datasource": { "type": "prometheus", "uid": "$${datasource}" },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "$${datasource}" }, "expr": "sum(omni_connected_machines)", "refId": "A" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 1 }] }
+        }
+      },
+      "options": { "colorMode": "value", "graphMode": "none", "textMode": "value" }
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Clusters Running",
+      "gridPos": { "x": 18, "y": 0, "w": 6, "h": 4 },
+      "datasource": { "type": "prometheus", "uid": "$${datasource}" },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "$${datasource}" }, "expr": "sum(omni_clusters{phase=\"RUNNING\"})", "refId": "A" }
+      ],
+      "options": { "colorMode": "value", "graphMode": "none", "textMode": "value" }
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Machines: total vs connected",
+      "gridPos": { "x": 0, "y": 4, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "$${datasource}" },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "$${datasource}" }, "expr": "sum(omni_machines)", "legendFormat": "total", "refId": "A" },
+        { "datasource": { "type": "prometheus", "uid": "$${datasource}" }, "expr": "sum(omni_connected_machines)", "legendFormat": "connected", "refId": "B" }
+      ],
+      "fieldConfig": { "defaults": { "custom": { "drawStyle": "line", "fillOpacity": 10 } } }
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Clusters by phase",
+      "gridPos": { "x": 12, "y": 4, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "$${datasource}" },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "$${datasource}" }, "expr": "sum by (phase) (omni_clusters)", "legendFormat": "{{phase}}", "refId": "A" }
+      ],
+      "fieldConfig": { "defaults": { "custom": { "drawStyle": "line", "fillOpacity": 20, "stacking": { "mode": "normal" } } } }
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Machines by platform",
+      "gridPos": { "x": 0, "y": 12, "w": 24, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "$${datasource}" },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "$${datasource}" }, "expr": "sum by (platform) (omni_machine_platforms)", "legendFormat": "{{platform}}", "refId": "A" }
+      ],
+      "fieldConfig": { "defaults": { "custom": { "drawStyle": "line", "fillOpacity": 20, "stacking": { "mode": "normal" } } } }
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "Median SideroLink handshake age",
+      "description": "Omni's own source labels 480s (8m) as \"considered disconnected now\" -- the OmniSiderolinkHandshakesStale alert fires past that line.",
+      "gridPos": { "x": 0, "y": 20, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "$${datasource}" },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "$${datasource}" }, "expr": "histogram_quantile(0.5, sum by (le) (rate(omni_siderolink_last_handshake_seconds_bucket[15m])))", "legendFormat": "p50 handshake age", "refId": "A" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": { "drawStyle": "line", "fillOpacity": 10 },
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 480 }] }
+        }
+      }
+    },
+    {
+      "id": 9,
+      "type": "heatmap",
+      "title": "SideroLink handshake age distribution",
+      "gridPos": { "x": 12, "y": 20, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "$${datasource}" },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "$${datasource}" }, "expr": "sum by (le) (rate(omni_siderolink_last_handshake_seconds_bucket[5m]))", "format": "heatmap", "legendFormat": "{{le}}", "refId": "A" }
+      ]
+    },
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "HTTP request rate by status code",
+      "gridPos": { "x": 0, "y": 28, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "$${datasource}" },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "$${datasource}" }, "expr": "sum by (code) (rate(http_requests_total[5m]))", "legendFormat": "{{code}}", "refId": "A" }
+      ],
+      "fieldConfig": { "defaults": { "custom": { "drawStyle": "line", "fillOpacity": 10, "stacking": { "mode": "normal" } } } }
+    },
+    {
+      "id": 11,
+      "type": "timeseries",
+      "title": "5xx error rate",
+      "description": "The OmniHighServerErrorRate alert fires above 5%.",
+      "gridPos": { "x": 12, "y": 28, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "$${datasource}" },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "$${datasource}" }, "expr": "100 * sum(rate(http_requests_total{code=~\"5..\"}[5m])) / sum(rate(http_requests_total[5m]))", "legendFormat": "5xx %", "refId": "A" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "max": 100,
+          "min": 0,
+          "custom": { "drawStyle": "line", "fillOpacity": 10 },
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 5 }] }
+        }
+      }
+    },
+    {
+      "id": 12,
+      "type": "stat",
+      "title": "Volume Capacity",
+      "description": "Omni's etcd/state PVC's requested size (omni.persistence_size), not the underlying filesystem's real capacity -- see the note on the Used % panel.",
+      "gridPos": { "x": 0, "y": 36, "w": 8, "h": 4 },
+      "datasource": { "type": "prometheus", "uid": "$${datasource}" },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "$${datasource}" }, "expr": "sum(kube_persistentvolumeclaim_resource_requests_storage_bytes{namespace=\"omni\",persistentvolumeclaim=\"omni\"})", "refId": "A" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "bytes" } },
+      "options": { "colorMode": "value", "graphMode": "none", "textMode": "value" }
+    },
+    {
+      "id": 13,
+      "type": "stat",
+      "title": "Volume Used",
+      "gridPos": { "x": 8, "y": 36, "w": 8, "h": 4 },
+      "datasource": { "type": "prometheus", "uid": "$${datasource}" },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "$${datasource}" }, "expr": "sum(kubelet_volume_stats_used_bytes{namespace=\"omni\",persistentvolumeclaim=\"omni\"})", "refId": "A" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "bytes" } },
+      "options": { "colorMode": "value", "graphMode": "none", "textMode": "value" }
+    },
+    {
+      "id": 14,
+      "type": "stat",
+      "title": "Volume Used %",
+      "description": "Against kubelet's own reported filesystem capacity, not the PVC's requested size -- on a storage class that doesn't enforce quotas (e.g. this repo's local-path default), the two can differ a lot. This is the number that predicts actual disk pressure -- etcd itself will refuse writes well before the volume is nominally full.",
+      "gridPos": { "x": 16, "y": 36, "w": 8, "h": 4 },
+      "datasource": { "type": "prometheus", "uid": "$${datasource}" },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "$${datasource}" }, "expr": "100 * sum(kubelet_volume_stats_used_bytes{namespace=\"omni\",persistentvolumeclaim=\"omni\"}) / sum(kubelet_volume_stats_capacity_bytes{namespace=\"omni\",persistentvolumeclaim=\"omni\"})", "refId": "A" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "max": 100,
+          "min": 0,
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "orange", "value": 75 }, { "color": "red", "value": 90 }] }
+        }
+      },
+      "options": { "colorMode": "value", "graphMode": "none", "textMode": "value" }
+    },
+    {
+      "id": 15,
+      "type": "timeseries",
+      "title": "Volume usage over time",
+      "gridPos": { "x": 0, "y": 40, "w": 24, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "$${datasource}" },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "$${datasource}" }, "expr": "sum by (persistentvolumeclaim) (kubelet_volume_stats_used_bytes{namespace=\"omni\",persistentvolumeclaim=\"omni\"})", "legendFormat": "{{persistentvolumeclaim}} used", "refId": "A" },
+        { "datasource": { "type": "prometheus", "uid": "$${datasource}" }, "expr": "sum by (persistentvolumeclaim) (kubelet_volume_stats_capacity_bytes{namespace=\"omni\",persistentvolumeclaim=\"omni\"})", "legendFormat": "{{persistentvolumeclaim}} capacity", "refId": "B" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "bytes", "custom": { "drawStyle": "line", "fillOpacity": 10 } } }
+    }
+  ]
+}

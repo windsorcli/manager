@@ -1,0 +1,61 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: omni-alerts
+  namespace: omni
+spec:
+  groups:
+    - name: omni-supplemental.rules
+      rules:
+        # job is the metrics Service's own name (omni-metrics), not the app name —
+        # Prometheus Operator defaults the job label to the Service's metadata.name
+        # when the ServiceMonitor sets no jobLabel, and this chart's metrics Service
+        # is named "<fullnameOverride>-metrics".
+        - alert: OmniAbsent
+          expr: absent(up{job="omni-metrics"})
+          for: 10m
+          labels:
+            severity: critical
+          annotations:
+            summary: Omni absent (job {{ $labels.job }})
+            description: "Omni has disappeared from Prometheus service discovery. The fleet's Talos control plane is unreachable -- no cluster can be managed until it's back.\n  VALUE = {{ $value }}\n  LABELS = {{ $labels }}"
+
+        # omni_siderolink_last_handshake_seconds is an unlabeled histogram Omni
+        # itself observes one sample into per peer per check cycle -- its bucket
+        # boundaries are Omni's own source comments, not a threshold picked here:
+        # 480s (8m) is the boundary Omni's own code labels "considered disconnected
+        # now". A rising median past that boundary means most peers, not just one
+        # flaky machine, have gone stale -- usually the WireGuard endpoint
+        # (omni.wireguard.advertised_endpoint) stopped being reachable.
+        - alert: OmniSiderolinkHandshakesStale
+          expr: histogram_quantile(0.5, sum(rate(omni_siderolink_last_handshake_seconds_bucket[15m])) by (le)) > 480
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: Median SideroLink handshake age above 8 minutes
+            description: "The median time since the last WireGuard handshake, across all SideroLink peers, has been above 480s (Omni's own 'considered disconnected' boundary) for 15 minutes.\n  VALUE = {{ $value }}\n  LABELS = {{ $labels }}"
+
+        # code is the numeric HTTP status code (promhttp.InstrumentHandlerCounter),
+        # so code=~"5.." covers every 5xx handler response across the API/UI/proxy.
+        - alert: OmniHighServerErrorRate
+          expr: sum(rate(http_requests_total{job="omni-metrics",code=~"5.."}[5m])) / sum(rate(http_requests_total{job="omni-metrics"}[5m])) > 0.05
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: Omni server error rate above 5%
+            description: "More than 5% of Omni's HTTP responses have been 5xx over the last 5 minutes.\n  VALUE = {{ $value }}\n  LABELS = {{ $labels }}"
+
+        # omni_clusters{phase} enumerates every phase as its own series (including
+        # zero-valued ones), so this only matches phases actually holding a cluster.
+        # No cluster-name label exists on this metric -- it's a count, not a list --
+        # so the alert can only say a cluster is stuck, not which one.
+        - alert: OmniClusterNotRunning
+          expr: omni_clusters{phase!="RUNNING"} > 0
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: An Omni-managed cluster has been stuck outside RUNNING (phase {{ $labels.phase }})
+            description: "At least one cluster has been in phase {{ $labels.phase }} for 30 minutes instead of RUNNING. Check the Omni UI for which cluster -- this metric only carries a count per phase.\n  VALUE = {{ $value }}\n  LABELS = {{ $labels }}"

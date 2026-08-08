@@ -1,0 +1,68 @@
+# config-observability.yaml facet tests
+# Covers the manager-observability Kustomization itself. What actually lands in its
+# components list is exercised by each contributor's own test file (e.g.
+# addon-omni.test.yaml's "adds the prometheus component..." case) — this file only
+# proves the domain exists and is gated correctly, since asserting an empty
+# components list here can't fail either way (see the note on subset-matching in
+# config-object-store.test.yaml).
+
+x-defaults:
+  network: &default-network
+    cidr_block: 10.5.0.0/16
+    loadbalancer_driver: kube-vip
+    loadbalancer_mode: arp
+    loadbalancer_ips:
+      start: "10.5.1.10"
+      end: "10.5.1.100"
+
+  cluster: &default-cluster
+    driver: talos
+    controlplanes:
+      nodes:
+        controlplane-1:
+          endpoint: 10.5.0.10:50000
+          node: 10.5.0.10
+          hostname: controlplane-1
+    workers:
+      volumes:
+        - /var/mnt/local
+
+cases:
+  # telemetry.metrics.enabled is opt-in — Core's own telemetry-install Kustomization
+  # gates on a bare check (platform-base.yaml), not a `?? true` default, despite one
+  # existing elsewhere in Core for an unrelated computed value. Match Core's real
+  # behavior, not its inconsistent-looking default.
+  - name: creates the domain when metrics are enabled
+    values:
+      platform: metal
+      network: *default-network
+      cluster: *default-cluster
+      telemetry:
+        metrics:
+          enabled: true
+    expect:
+      flux:
+        - name: manager-observability
+          dependsOn:
+            - telemetry-install
+
+  # The actual CI failure this locks in: telemetry.metrics unset (not explicitly
+  # false) must exclude the domain too, since telemetry-install itself won't exist.
+  - name: excludes the domain when metrics are unset
+    values:
+      platform: metal
+      network: *default-network
+      cluster: *default-cluster
+    expect:
+      flux: []
+
+  - name: excludes the domain when metrics are disabled
+    values:
+      platform: metal
+      network: *default-network
+      cluster: *default-cluster
+      telemetry:
+        metrics:
+          enabled: false
+    expect:
+      flux: []
