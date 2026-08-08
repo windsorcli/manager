@@ -39,7 +39,7 @@ spec:
         # code is the numeric HTTP status code (promhttp.InstrumentHandlerCounter),
         # so code=~"5.." covers every 5xx handler response across the API/UI/proxy.
         - alert: OmniHighServerErrorRate
-          expr: sum(rate(http_requests_total{code=~"5.."}[5m])) / sum(rate(http_requests_total[5m])) > 0.05
+          expr: sum(rate(http_requests_total{job="omni-metrics",code=~"5.."}[5m])) / sum(rate(http_requests_total{job="omni-metrics"}[5m])) > 0.05
           for: 10m
           labels:
             severity: warning

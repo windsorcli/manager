@@ -87,10 +87,21 @@ tests:
   # 1 of 20 requests is a 5xx (5%) -- right at the threshold, not over it.
   - interval: 1m
     input_series:
-      - series: 'http_requests_total{code="200",method="get",handler="api"}'
+      - series: 'http_requests_total{job="omni-metrics",code="200",method="get",handler="api"}'
         values: '0+19x30'
-      - series: 'http_requests_total{code="500",method="get",handler="api"}'
+      - series: 'http_requests_total{job="omni-metrics",code="500",method="get",handler="api"}'
         values: '0+1x30'
+    alert_rule_test:
+      - eval_time: 16m
+        alertname: OmniHighServerErrorRate
+        exp_alerts: []
+
+  # A different service's http_requests_total at 100% error rate -- proves the alert is
+  # job-scoped and doesn't aggregate across every service exposing this metric name.
+  - interval: 1m
+    input_series:
+      - series: 'http_requests_total{job="other-service",code="500",method="get",handler="api"}'
+        values: '0+20x30'
     alert_rule_test:
       - eval_time: 16m
         alertname: OmniHighServerErrorRate
@@ -99,9 +110,9 @@ tests:
   # 2 of 20 requests are 5xx (10%), sustained past the 10m "for" window.
   - interval: 1m
     input_series:
-      - series: 'http_requests_total{code="200",method="get",handler="api"}'
+      - series: 'http_requests_total{job="omni-metrics",code="200",method="get",handler="api"}'
         values: '0+18x30'
-      - series: 'http_requests_total{code="500",method="get",handler="api"}'
+      - series: 'http_requests_total{job="omni-metrics",code="500",method="get",handler="api"}'
         values: '0+2x30'
     alert_rule_test:
       - eval_time: 5m
