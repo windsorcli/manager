@@ -1,0 +1,428 @@
+kind: Facet
+apiVersion: blueprints.windsorcli.dev/v1alpha1
+metadata:
+  name: provisioning
+  description: Downstream cluster provisioning — self-hosted Talos image factory and Sidero Omni
+
+# image_factory and omni toggle independently under provisioning (a single cluster can
+# want air-gapped, version-pinned Talos assets without fleet-wide provisioning), so this
+# is the coarse OR-gate; every terraform/config/flux entry below carries its own precise
+# when: for which of the two it belongs to. Same shape as Core's telemetry facet, whose
+# top-level when: is metrics.enabled || logs.enabled with per-component ternaries beneath.
+when: provisioning.enabled == true || provisioning.image_factory.enabled == true
+
+requires:
+  - when: >-
+      provisioning.object_store.driver == 'hetzner' && provisioning.image_factory.enabled == true
+      && ((env("HETZNER_S3_ACCESS_KEY") ?? '') == '' || (env("HETZNER_S3_SECRET_KEY") ?? '') == '')
+    paths:
+      - hetzner.object_storage.access_key
+      - hetzner.object_storage.secret_key
+    message: >-
+      Hetzner issues S3 credentials from the console only, so they cannot be provisioned.
+      Export HETZNER_S3_ACCESS_KEY and HETZNER_S3_SECRET_KEY, or set both values here.
+
+  - when: provisioning.object_store.driver == 'minio' && provisioning.image_factory.enabled == true
+    paths:
+      - provisioning.object_store.minio.endpoint
+    message: >-
+      Core's object store addon installs the MinIO operator but creates no Tenant, so the
+      S3 endpoint of the Tenant serving these buckets has to be given explicitly.
+
+  # Omni only — image_factory has no requirements of its own.
+  - when: provisioning.enabled == true && identity.enabled != false
+    paths:
+      - gateway.enabled
+    message: Omni's UI/API, Kubernetes proxy, and SideroLink machine API are reached over HTTPS through the cluster gateway — enable the gateway.
+  - when: provisioning.enabled == true && identity.enabled != false && dev != true
+    paths:
+      - provisioning.omni.etcd_encryption_key
+    message: Omni needs a GPG-armored private key to decrypt its etcd master key. Generate one with `(export GNUPGHOME=$(mktemp -d); gpg --batch --passphrase '' --quick-gen-key x; gpg -a --export-secret-key > omni.asc; rm -rf $GNUPGHOME)` and set provisioning.omni.etcd_encryption_key via a secret() reference.
+  - when: provisioning.enabled == true && identity.enabled != false && (omni_effective.wireguard_advertised_endpoint ?? '') == ''
+    paths:
+      - provisioning.omni.wireguard.advertised_endpoint
+    message: SideroLink's gateway LoadBalancer IP isn't known ahead of a cloud-managed LB controller provisioning it (aws, hetzner, azure). Apply once, then set provisioning.omni.wireguard.advertised_endpoint to <load-balancer-ip>:30180 and apply again.
+  - when: provisioning.enabled == true && identity.enabled != false && dev != true
+    paths:
+      - provisioning.omni.initial_admins
+    message: Omni requires at least one bootstrap admin email in config.auth.initialUsers before it will start. Set provisioning.omni.initial_admins to a list of operator emails — real access should route through Keycloak SAML group membership once it's set up.
+
+# =============================================================================
+# Terraform — cache signing key (image factory), account ID (omni), object-store
+# buckets (image factory's registry, on hetzner/aws)
+# =============================================================================
+# The signing key and account ID are generated once and held in state, applied only
+# when the operator supplies no value of their own. Bucket provisioning only runs
+# where the platform's own object storage backs the registry.
+terraform:
+
+  - name: image-factory-signing-key
+    path: keys/signing
+    when: provisioning.image_factory.enabled == true && (provisioning.image_factory.cache_signing_key ?? '') == ''
+
+  - name: omni-account
+    path: ids/omni-account
+    when: provisioning.enabled == true && identity.enabled != false && (provisioning.omni.account_id ?? '') == ''
+
+  - name: object-store
+    path: object-store/hetzner
+    when: provisioning.object_store.driver == 'hetzner' && provisioning.image_factory.enabled == true
+    inputs:
+      access_key: ${hetzner.object_storage.access_key ?? env("HETZNER_S3_ACCESS_KEY")}
+      secret_key: ${hetzner.object_storage.secret_key ?? env("HETZNER_S3_SECRET_KEY")}
+      location: "${hetzner.object_storage.location ?? 'fsn1'}"
+      buckets:
+        - "${provisioning.object_store.prefix}-image-factory"
+
+  - name: object-store
+    path: object-store/aws
+    when: provisioning.object_store.driver == 'aws' && provisioning.image_factory.enabled == true
+    inputs:
+      region: ${aws.region}
+      buckets:
+        - "${provisioning.object_store.prefix}-image-factory"
+
+config:
+  # Object storage backing the image factory's in-cluster registry. driver: hetzner
+  # and aws provision buckets in the platform's own object storage; minio uses Core's
+  # in-cluster operator, which installs no Tenant, so its endpoint stays an operator
+  # input; none means no bucket-backed storage is available.
+  - name: provisioning
+    value:
+      object_store:
+        driver: none
+        endpoint: ""
+        region: ""
+        prefix: "windsor-${id}"
+
+  - name: provisioning
+    when: platform == 'hetzner'
+    value:
+      object_store:
+        driver: hetzner
+        # Object Storage runs in fsn1, nbg1, and hel1 only, so its location is set
+        # independently of where the servers run.
+        endpoint: "https://${hetzner.object_storage.location ?? 'fsn1'}.your-objectstorage.com"
+        region: "${hetzner.object_storage.location ?? 'fsn1'}"
+
+  - name: provisioning
+    when: platform == 'aws'
+    value:
+      object_store:
+        driver: aws
+        endpoint: "https://s3.${aws.region}.amazonaws.com"
+        region: "${aws.region}"
+
+  # object_store.enabled/driver here are Core's own raw operator toggle (object_store
+  # is a flat top-level key there — see ../core's schema), not
+  # provisioning.object_store: Core's minio operator installs no Tenant, so an
+  # endpoint still has to come from provisioning.object_store.minio.endpoint below.
+  - name: provisioning
+    when: platform != 'hetzner' && platform != 'aws' && (object_store.enabled ?? false) == true
+    value:
+      object_store:
+        driver: minio
+        endpoint: "${provisioning.object_store.minio.endpoint ?? ''}"
+        region: ""
+
+  # provisioning.enabled == true fans on the capabilities Omni depends on: Core's
+  # identity (Keycloak, and through it the database the server needs) and the image
+  # factory Omni provisions Talos machines from. Both schema-default to enabled: false,
+  # so a guard here would always read that default back as false — set true
+  # unconditionally instead; an operator's own explicit false in values.yaml still wins,
+  # since the composer merges raw operator values over facet-computed config last each
+  # round.
+  - name: identity
+    when: provisioning.enabled == true
+    value:
+      enabled: true
+
+  - name: provisioning
+    when: provisioning.enabled == true
+    value:
+      image_factory:
+        enabled: true
+
+  # Bare hostnames (no port) for gateway HTTPRoute matching — sibling single-level
+  # subdomains so they fit the gateway's own wildcard certificate SAN (*.<domain>),
+  # the same constraint image-factory's own factory.<domain> route works within.
+  - name: omni_effective
+    value:
+      domain: >-
+        ${(dns.public_domain ?? '') == ''
+          ? (dns.private_domain ?? dns.domain ?? '')
+          : dns.public_domain}
+      hostname: >-
+        ${provisioning.omni.hostname
+          ?? ('omni.' + ((dns.public_domain ?? '') == ''
+                ? (dns.private_domain ?? dns.domain ?? '')
+                : dns.public_domain))}
+      kube_proxy_hostname: >-
+        ${'omni-kube.' + ((dns.public_domain ?? '') == ''
+              ? (dns.private_domain ?? dns.domain ?? '')
+              : dns.public_domain)}
+      machine_api_hostname: >-
+        ${'omni-siderolink.' + ((dns.public_domain ?? '') == ''
+              ? (dns.private_domain ?? dns.domain ?? '')
+              : dns.public_domain)}
+      # docker-desktop reaches the gateway on 8443 rather than 443 — same port
+      # image-factory's own external URL derivation appends.
+      external_port_suffix: "${workstation.runtime == 'docker-desktop' ? ':8443' : ''}"
+      # NodePort environments (docker-desktop by default) and envoy driver keep the
+      # chart's own dedicated Service (omni/nodeport, omni/loadbalancer). cilium
+      # driver routes through a dedicated Gateway sharing the shared gateway's IP
+      # instead (omni/gateway/wireguard) — see docs/adr/0005 for why not envoy too.
+      wireguard_node_port: "${provisioning.omni.wireguard.node_port ?? 30180}"
+      # NodePort: derive from the control-plane node's own address (not 127.0.0.1 —
+      # a remote device dials this, docker-desktop's loopback trick doesn't apply).
+      # cilium: the shared gateway's IP is pinned (lbipam.cilium.io/ips), known
+      # without an apply. Everything else (envoy's own dedicated Service, cloud LB
+      # controllers) has no derivable default — dev mode gets a placeholder, others
+      # hit the requires: check below.
+      wireguard_advertised_endpoint: >-
+        ${provisioning.omni.wireguard.advertised_endpoint
+          ?? (lb_effective.mode == 'nodeport'
+              ? (len(terraform_output('compute', 'controlplanes') ?? []) > 0
+                  ? (split(terraform_output('compute', 'controlplanes')[0].endpoint, ':')[0] + ':' + string(provisioning.omni.wireguard.node_port ?? 30180))
+                  : (len(values(cluster.controlplanes.nodes ?? {})) > 0
+                      ? (split(values(cluster.controlplanes.nodes)[0].endpoint, ':')[0] + ':' + string(provisioning.omni.wireguard.node_port ?? 30180))
+                      : (dev == true ? '0.0.0.0:' + string(provisioning.omni.wireguard.node_port ?? 30180) : '')))
+              : (gateway.driver == 'cilium' && lb_effective.controller_required != true
+                  ? network.loadbalancer_ips.start + ':' + string(provisioning.omni.wireguard.node_port ?? 30180)
+                  : (dev == true ? '0.0.0.0:' + string(provisioning.omni.wireguard.node_port ?? 30180) : '')))}
+
+  # docker-desktop only forwards explicitly published container ports, so the
+  # NodePort needs a matching hostport (same-port passthrough). An operator's own
+  # hostports list still wins (raw values merge over facet-computed config last).
+  - name: cluster
+    when: provisioning.enabled == true && identity.enabled != false && workstation.runtime == 'docker-desktop'
+    value:
+      controlplanes:
+        hostports: >-
+          ${["8080:30080/tcp", "8443:30443/tcp",
+             string(provisioning.omni.wireguard.node_port ?? 30180) + ":" + string(provisioning.omni.wireguard.node_port ?? 30180) + "/udp"]}
+      workers:
+        hostports: >-
+          ${["8080:30080/tcp", "8443:30443/tcp",
+             string(provisioning.omni.wireguard.node_port ?? 30180) + ":" + string(provisioning.omni.wireguard.node_port ?? 30180) + "/udp"]}
+
+  # Split from the block above so the dev-only key can be a plain literal rather
+  # than an expression string (the expression grammar has no escape for embedded
+  # newlines). Same shape as Core's dev-vs-supplied admin secret: an operator's own
+  # key always wins; the fixed key below only fills in under dev == true.
+  - name: omni_effective
+    when: (provisioning.omni.etcd_encryption_key ?? '') != ''
+    value:
+      etcd_encryption_key: ${provisioning.omni.etcd_encryption_key}
+
+  - name: omni_effective
+    when: (provisioning.omni.etcd_encryption_key ?? '') == '' && dev == true
+    value:
+      etcd_encryption_key: |
+        -----BEGIN PGP PRIVATE KEY BLOCK-----
+
+        lFgEam/o7RYJKwYBBAHaRw8BAQdAvJ9sgNU/mNzzUURBYW6rkxtT4CG3gBGpE+eE
+        Zb2p0doAAQC6a3yRWocfjRbzoj0kbi1Kaf6J2RVYSJIeXIibogXNfw5RtBZvbW5p
+        LWRldkB3aW5kc29yLmxvY2FsiJkEExYKAEEWIQQCFqLg03r7RzBHWbarvUkg+WLH
+        RAUCam/o7QIbAwUJBaOagAULCQgHAgIiAgYVCgkICwIEFgIDAQIeBwIXgAAKCRCr
+        vUkg+WLHRNj1AP9fTur/3Cq1p201dcKiEKTK11f3f94RsM7OL/H5dqS+hAD/Wq85
+        8HRIUTCBxYuHUN/avZsqNrgKJp+kQ3Jn7zsacwCcXQRqb+jtEgorBgEEAZdVAQUB
+        AQdABe+v5DT6Lecck95BrSJPhgjTkvm+cusXbfcF5Sj4pzkDAQgHAAD/aD9EB6jX
+        l0czZpI3Z/4giLs+zY5F3fl1MVx3uXAJZugQJYh4BBgWCgAgFiEEAhai4NN6+0cw
+        R1m2q71JIPlix0QFAmpv6O0CGwwACgkQq71JIPlix0Tq9QEA/56y3LK4fPcMtSML
+        jyCiP+FVoAB7rXpg+V0ATF/PAQ4BAKf6DkIvk2L2r2u3x/F0ARkZZTnSwBX84lY2
+        /YJzgncL
+        =ujZb
+        -----END PGP PRIVATE KEY BLOCK-----
+
+# =============================================================================
+# Flux systems — image factory, omni
+# =============================================================================
+# Both kustomizations point at kustomize/provisioning (path: below): pki-install issues
+# the TLS certificate and gateway-install supplies the route CRDs for image-factory;
+# identity-resources gives omni its SAML realm to register against. Every namespace,
+# HelmRelease, and conditional add-on lives under kustomize/provisioning — see its
+# README for the full component/dependency tables.
+#
+flux:
+
+  - name: image-factory
+    when: provisioning.image_factory.enabled == true
+    path: provisioning
+    dependsOn:
+      - pki-install
+      - "${gateway.enabled == true ? 'gateway-install' : ''}"
+    # The chart reads the key from the data key `cache-signing.key`.
+    secrets:
+      registry-s3:
+        data:
+          access_key: ${hetzner.object_storage.access_key ?? env("HETZNER_S3_ACCESS_KEY") ?? ''}
+          secret_key: ${hetzner.object_storage.secret_key ?? env("HETZNER_S3_SECRET_KEY") ?? ''}
+      image-factory-cache-signing-key:
+        data:
+          cache-signing.key: ${provisioning.image_factory.cache_signing_key ?? terraform_output("image-factory-signing-key", "private_key_pem")}
+    install:
+      components:
+        - image-factory
+        - "${(provisioning.image_factory.registry.schematic.registry ?? '') == '' ? 'registry' : ''}"
+        - "${(provisioning.image_factory.registry.schematic.registry ?? '') == '' && (provisioning.object_store.driver == 'hetzner' || provisioning.object_store.driver == 'aws') ? 'registry/s3' : ''}"
+        - "${(provisioning.image_factory.registry.schematic.registry ?? '') == '' && provisioning.object_store.driver != 'hetzner' && provisioning.object_store.driver != 'aws' ? 'registry/pvc' : ''}"
+        - "${topology == 'ha' ? 'image-factory/ha' : ''}"
+        - "${(telemetry.metrics.enabled ?? false) == true ? 'image-factory/prometheus' : ''}"
+      substitutions:
+        # The same expression the terraform block above hands the bucket module, so
+        # the registry and the bucket that gets provisioned cannot drift apart.
+        registry_bucket: "${provisioning.object_store.prefix}-image-factory"
+        registry_region: "${provisioning.object_store.region ?? ''}"
+        registry_endpoint: "${provisioning.object_store.endpoint ?? ''}"
+        registry_storage_class: "${cluster.storage.class ?? 'single'}"
+        registry_storage_size: "${provisioning.image_factory.registry_size ?? '10Gi'}"
+        registry_replicas: "${topology == 'ha' && (provisioning.object_store.driver == 'hetzner' || provisioning.object_store.driver == 'aws') ? 2 : 1}"
+        external_domain: "${(dns.public_domain ?? '') == '' ? (dns.private_domain ?? dns.domain ?? '') : dns.public_domain}"
+        # Explicit override wins; else derive from the domain the route publishes on.
+        # docker-desktop reaches the gateway on 8443 rather than 443.
+        factory_external_url: >-
+          ${provisioning.image_factory.external_url
+            ?? ('https://factory.' + ((dns.public_domain ?? '') == ''
+                  ? (dns.private_domain ?? dns.domain ?? '')
+                  : dns.public_domain)
+                + (workstation.runtime == 'docker-desktop' ? ':8443' : ''))}
+        factory_schematic_registry: "${provisioning.image_factory.registry.schematic.registry ?? 'registry.provisioning.svc.cluster.local:5000'}"
+        factory_schematic_namespace: "${provisioning.image_factory.registry.schematic.namespace ?? 'siderolabs/image-factory'}"
+        factory_schematic_repository: "${provisioning.image_factory.registry.schematic.repository ?? 'schematics'}"
+        factory_schematic_insecure: "${(provisioning.image_factory.registry.schematic.registry ?? '') == '' ? true : (provisioning.image_factory.registry.schematic.insecure ?? false)}"
+        factory_max_concurrency: "${provisioning.image_factory.max_concurrency ?? 6}"
+        factory_min_talos_version: "${provisioning.image_factory.min_talos_version ?? '1.2.0'}"
+        factory_cache_registry: "${provisioning.image_factory.registry.schematic.registry ?? 'registry.provisioning.svc.cluster.local:5000'}"
+        factory_cache_insecure: "${(provisioning.image_factory.registry.schematic.registry ?? '') == '' ? true : (provisioning.image_factory.registry.schematic.insecure ?? false)}"
+        # Same registry as schematic/cache above — the chart's own default
+        # (ghcr.io/siderolabs) is the upstream project's namespace, which a
+        # self-hosted factory has no push credentials for.
+        factory_installer_registry: "${provisioning.image_factory.registry.schematic.registry ?? 'registry.provisioning.svc.cluster.local:5000'}"
+        factory_installer_repository: "${provisioning.image_factory.registry.installer.repository ?? 'installer'}"
+        factory_installer_insecure: "${(provisioning.image_factory.registry.schematic.registry ?? '') == '' ? true : (provisioning.image_factory.registry.schematic.insecure ?? false)}"
+      timeout: 10m
+      interval: 5m
+    resources:
+      - when: (gateway.enabled ?? ingress.enabled ?? true) == true
+        dependsOn:
+          - gateway-resources
+        components:
+          - image-factory/gateway
+        substitutions:
+          external_domain: "${(dns.public_domain ?? '') == '' ? (dns.private_domain ?? dns.domain ?? '') : dns.public_domain}"
+        timeout: 10m
+        interval: 5m
+
+  # identity-resources because Omni's SAML config points at the platform realm's
+  # descriptor at startup, and the omni/saml-client Job registers Omni as a client of
+  # that same realm over the admin REST API.
+  #
+  # Conditional components:
+  #   - omni/prometheus: metrics Service and ServiceMonitor.
+  #   - omni/exporter: omni_exporter Deployment (siderolabs/omni_exporter), off until
+  #     provisioning.omni.service_account_key is set — nothing here can create that
+  #     key. It's a Reader-role service account, an admin creates by hand after first
+  #     login (`omnictl serviceaccount create --use-user-role=false --role=Reader
+  #     omni-exporter`) and hands to Windsor via a secret() reference. Everything past
+  #     that point — the Deployment, the Secret, the ServiceMonitor — is ordinary Manager
+  #     automation; only the key itself is unautomatable.
+  #
+  - name: omni
+    when: provisioning.enabled == true && identity.enabled != false
+    path: provisioning
+    dependsOn:
+      - identity-resources
+    secrets:
+      omni-etcd-encryption-key:
+        data:
+          omni.asc: ${omni_effective.etcd_encryption_key}
+      # Empty unless provisioning.omni.service_account_key is set — harmless either
+      # way, since omni/exporter (the only consumer) is excluded from components in
+      # that case too.
+      omni-service-account-key:
+        data:
+          key: ${provisioning.omni.service_account_key ?? ''}
+    install:
+      components:
+        - omni
+        - omni/saml-client
+        - "${(telemetry.metrics.enabled ?? false) == true ? 'omni/prometheus' : ''}"
+        - "${lb_effective.mode == 'nodeport' ? 'omni/nodeport' : ''}"
+        - "${lb_effective.mode != 'nodeport' && gateway.driver != 'cilium' ? 'omni/loadbalancer' : ''}"
+        - "${(telemetry.metrics.enabled ?? false) == true && (provisioning.omni.service_account_key ?? '') != '' ? 'omni/exporter' : ''}"
+      substitutions:
+        omni_account_id: "${provisioning.omni.account_id ?? terraform_output('omni-account', 'id')}"
+        omni_hostname: "${omni_effective.hostname}${omni_effective.external_port_suffix}"
+        omni_kube_proxy_hostname: "${omni_effective.kube_proxy_hostname}${omni_effective.external_port_suffix}"
+        omni_machine_api_hostname: "${omni_effective.machine_api_hostname}${omni_effective.external_port_suffix}"
+        omni_persistence_size: "${provisioning.omni.persistence_size ?? '16Gi'}"
+        omni_persistence_storage_class: "${cluster.storage.class ?? 'single'}"
+        # config.registries.imageFactoryBaseURL. This one value serves two
+        # purposes in Omni's own client (client/pkg/imagefactory/client.go): its
+        # own reconciliation calls, and the download links it hands back to an
+        # operator's browser — so it has to be the external, browser-reachable
+        # URL, not the in-cluster Service. Falls back to Manager's own image
+        # factory when it's enabled, else the chart's public default.
+        omni_image_factory_url: "${provisioning.image_factory.external_url ?? (provisioning.image_factory.enabled == true ? ('https://factory.' + omni_effective.domain + omni_effective.external_port_suffix) : 'https://factory.talos.dev')}"
+        # The chart refuses to start with zero initial users. dev mode seeds
+        # Core's own dev admin (keycloak/realm/dev-user), so a SAML login with
+        # that same identity is recognized immediately — not a separate,
+        # unrelated placeholder identity.
+        omni_initial_admins: "${provisioning.omni.initial_admins ?? (dev == true ? ['admin@local.test'] : [])}"
+        omni_wireguard_node_port: "${omni_effective.wireguard_node_port}"
+        omni_wireguard_advertised_endpoint: "${omni_effective.wireguard_advertised_endpoint}"
+        # The chart fetches this itself, server-side, so the internal (backchannel)
+        # descriptor URL avoids depending on the gateway route being reachable.
+        keycloak_saml_url: "${identity_effective.backchannel_issuer}/protocol/saml/descriptor"
+        keycloak_realm: "${identity_effective.realm}"
+        keycloak_admin_secret: "${(identity_effective.admin_password ?? '') != '' ? 'keycloak-bootstrap-admin' : 'keycloak-initial-admin'}"
+        # crewjam/saml (Omni's SAML library) has no configured EntityID, so it
+        # falls back to its own metadata URL as the issuer — not the bare root
+        # URL — per samlsp.DefaultServiceProvider (samlsp/new.go): metadataURL :=
+        # opts.URL.ResolveReference(&url.URL{Path: "saml/metadata"}).
+        omni_saml_entity_id: "https://${omni_effective.hostname}${omni_effective.external_port_suffix}/saml/metadata"
+        omni_saml_acs_url: "https://${omni_effective.hostname}${omni_effective.external_port_suffix}/saml/acs"
+      timeout: 10m
+      interval: 5m
+    resources:
+      - dependsOn:
+          - gateway-resources
+        components:
+          - omni/gateway
+          # A dedicated Gateway sharing the shared one's external IP (Cilium's
+          # lbipam.cilium.io/sharing-key), not a listener added to the shared Gateway
+          # itself — that would need two Kustomizations both applying the same
+          # object under Flux's one global field-manager identity. envoy driver
+          # keeps the dedicated NodePort/LoadBalancer Service (omni/nodeport) for
+          # now; see docs/adr/0005.
+          - "${gateway.driver == 'cilium' && lb_effective.mode != 'nodeport' ? 'omni/gateway/wireguard' : ''}"
+        substitutions:
+          external_domain: "${omni_effective.domain}"
+          loadbalancer_start_ip: "${network.loadbalancer_ips.start}"
+          omni_wireguard_node_port: "${omni_effective.wireguard_node_port}"
+        timeout: 10m
+        interval: 5m
+
+  # Both contribute into config-observability.yaml's manager-observability
+  # Kustomization rather than owning their own — see that facet's comment for why
+  # (name collision risk with Core's own observability/telemetry).
+  - name: manager-observability
+    when: provisioning.image_factory.enabled == true && (telemetry.metrics.enabled ?? false) == true
+    resources:
+      - components:
+          - prometheus/alerts/image-factory
+          - grafana/dashboards/image-factory
+        timeout: 5m
+        interval: 5m
+
+  # Neither needs omni/exporter: both work from Omni's native metrics alone, which
+  # telemetry.metrics.enabled already scrapes.
+  - name: manager-observability
+    when: provisioning.enabled == true && identity.enabled != false && (telemetry.metrics.enabled ?? false) == true
+    resources:
+      - components:
+          - prometheus/alerts/omni
+          - grafana/dashboards/omni
+        timeout: 5m
+        interval: 5m

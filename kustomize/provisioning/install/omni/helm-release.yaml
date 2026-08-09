@@ -1,0 +1,98 @@
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: omni
+  namespace: provisioning
+spec:
+  interval: 5m
+  timeout: 10m
+  targetNamespace: provisioning
+  install:
+    createNamespace: false
+    remediation:
+      retries: 3
+  upgrade:
+    remediation:
+      retries: 3
+  chart:
+    spec:
+      chart: omni
+      # renovate: datasource=docker depName=omni-chart package=ghcr.io/siderolabs/charts/omni
+      version: 2.9.3
+      sourceRef:
+        kind: HelmRepository
+        name: siderolabs
+  values:
+    fullnameOverride: omni
+    # Single replica: embedded etcd does not support multiple active writers.
+    replicaCount: 1
+    # Omni's own server-side calls (e.g. to its self-hosted image factory) verify
+    # TLS against the gateway's private-CA-signed certificate. The namespace is
+    # already labeled for trust-manager's Bundle projection (install/namespace.yaml),
+    # but Kyverno's inject-private-ca policy matches on the pod's own label, not
+    # the namespace's — this is what actually triggers the CA bundle mount.
+    podLabels:
+      use-custom-ca: "true"
+    config:
+      account:
+        id: ${omni_account_id}
+      services:
+        # No certFile/keyFile: TLS terminates at the shared gateway (HTTPRoutes in
+        # the omni/gateway component), the same pattern Keycloak uses. Only
+        # SideroLink's raw WireGuard tunnel can't fit that model, so it keeps its
+        # own dedicated Service below.
+        api:
+          advertisedURL: https://${omni_hostname}
+        kubernetesProxy:
+          advertisedURL: https://${omni_kube_proxy_hostname}
+        machineAPI:
+          advertisedURL: https://${omni_machine_api_hostname}
+        siderolink:
+          wireGuard:
+            advertisedEndpoint: ${omni_wireguard_advertised_endpoint}
+      auth:
+        # The chart defaults auth0 on; only one provider can be enabled at a time.
+        auth0:
+          enabled: false
+        # SAML client registered by the omni/saml-client Job. `url` — not
+        # `metadata`, despite its values.yaml description — is what Omni actually
+        # fetches live over HTTP (internal/backend/saml/saml.go: cfg.Metadata is
+        # read via os.ReadFile as a local path; only cfg.Url is HTTP-fetched). No
+        # secret handoff is needed for this direction. attributeRules is a
+        # required field even when empty — labelRules alone isn't enough to
+        # satisfy the chart's schema.
+        saml:
+          enabled: true
+          url: ${keycloak_saml_url}
+          nameIDFormat: email
+          labelRules:
+            saml.omni.sidero.dev/role: role
+          attributeRules: {}
+        initialUsers: ${omni_initial_admins}
+      storage:
+        default:
+          kind: etcd
+          etcd:
+            embedded: true
+            privateKeySource: file:///omni.asc
+      registries:
+        imageFactoryBaseURL: ${omni_image_factory_url}
+    # Materialized by the facet's secrets: block, data key `omni.asc`.
+    etcdEncryptionKey:
+      existingSecret: omni-etcd-encryption-key
+    persistence:
+      enabled: true
+      storageClassName: ${omni_persistence_storage_class}
+      size: ${omni_persistence_size}
+    # main and k8sProxy stay ClusterIP (chart default). wireguard defaults to
+    # ClusterIP too (cilium driver routes it through a dedicated Gateway); the
+    # nodeport/loadbalancer components override this for other cases.
+    service:
+      wireguard:
+        type: ClusterIP
+        port: ${omni_wireguard_node_port}
+    resources:
+      requests:
+        cpu: 500m
+        memory: 1Gi

@@ -168,8 +168,8 @@ jobs:
 
       # Provisioning is off by default, so without --set this would bring up a bare Core
       # cluster and assert nothing about what this repo adds. provisioning.enabled fans on
-      # identity (Keycloak), image-factory, and omni together — see config-provisioning.yaml
-      # and addon-omni.yaml's `when:`. dns.domain matches what the add-ons' routes publish
+      # identity (Keycloak), image-factory, and omni together — see addon-provisioning.yaml's
+      # `config:` and `when:` blocks. dns.domain matches what the add-ons' routes publish
       # under.
       - name: Windsor Init
         run: |
@@ -192,23 +192,21 @@ jobs:
       # Job did the right thing rather than merely exiting 0, so check that explicitly.
       - name: Verify the omni SAML client registered
         run: |
-          kubectl -n omni wait --for=condition=complete job/keycloak-omni-saml-client --timeout=5m
-          kubectl -n omni logs job/keycloak-omni-saml-client | grep -qE 'registered omni saml client|already registered'
+          kubectl -n provisioning wait --for=condition=complete job/keycloak-omni-saml-client --timeout=5m
+          kubectl -n provisioning logs job/keycloak-omni-saml-client | grep -qE 'registered omni saml client|already registered'
 
       - name: Diagnostics on failure
         if: failure()
         run: |
           kubectl get kustomizations -A || true
           kubectl get helmreleases -A || true
-          kubectl -n image-factory get events --sort-by=.lastTimestamp || true
-          kubectl -n image-factory describe pods || true
-          kubectl -n image-factory logs -l app.kubernetes.io/name=image-factory --tail=200 || true
-          kubectl -n image-factory logs -l app.kubernetes.io/name=registry --tail=200 || true
+          kubectl -n provisioning get events --sort-by=.lastTimestamp || true
+          kubectl -n provisioning describe pods || true
+          kubectl -n provisioning logs -l app.kubernetes.io/name=image-factory --tail=200 || true
+          kubectl -n provisioning logs -l app.kubernetes.io/name=registry --tail=200 || true
           kubectl -n system-identity get events --sort-by=.lastTimestamp || true
           kubectl -n system-identity describe pods || true
-          kubectl -n omni get events --sort-by=.lastTimestamp || true
-          kubectl -n omni describe pods || true
-          kubectl -n omni logs job/keycloak-omni-saml-client --tail=200 || true
+          kubectl -n provisioning logs job/keycloak-omni-saml-client --tail=200 || true
           flux get all -A || true
 
       - name: Windsor Down

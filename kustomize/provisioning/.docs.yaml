@@ -1,0 +1,152 @@
+# Descriptor consumed by scripts/kustomize-docs.sh to populate the
+# BEGIN_KUSTOMIZE_DOCS / END_KUSTOMIZE_DOCS region of README.md.
+# Edit this file (not the README tables) when substitutions, components,
+# or dependencies change.
+#
+# Multi-facet add-on: image-factory and omni each own a separate Flux
+# Kustomization (both declared in facet addon-provisioning.yaml) but share
+# this kustomize/ directory. Every component below declares which facet it
+# belongs to.
+
+facets:
+  - image-factory
+  - omni
+
+substitutions:
+  external_domain:
+    required_when: "always"
+    description: "Domain the factory is served under; the hostname is `factory.<external_domain>`. Public domain when set, otherwise the private domain or the cluster domain."
+  factory_schematic_registry:
+    required_when: "always"
+    description: "OCI registry the factory pushes generated schematics to. Needs push access; the chart's `registry.example.com` is a placeholder, not a working default."
+  factory_schematic_namespace:
+    required_when: "optional"
+    description: "Repository path prefix for schematics. Defaults to `siderolabs/image-factory`."
+  factory_schematic_repository:
+    required_when: "optional"
+    description: "Repository name for schematics. Defaults to `schematics`."
+  factory_schematic_insecure:
+    required_when: "optional"
+    description: "Allow HTTP or invalid TLS to the schematic registry. Defaults to `false`."
+  factory_max_concurrency:
+    required_when: "optional"
+    description: "Simultaneous asset builds. Defaults to `6`; each build is CPU-bound, so raise it with the node pool rather than ahead of it."
+  factory_min_talos_version:
+    required_when: "optional"
+    description: "Oldest Talos release assets are generated for. Defaults to `1.2.0`."
+  registry_bucket:
+    required_when: "`registry/s3`"
+    description: "Bucket backing the in-cluster registry. Built from `object_store.prefix`, the same expression that names the bucket the object-store Terraform module provisions."
+  registry_region:
+    required_when: "`registry/s3`"
+    description: "Region embedded in the S3 v4 signature, from `object_store.region` — the Hetzner object storage location, or the AWS region."
+  registry_endpoint:
+    required_when: "`registry/s3`"
+    description: "S3 endpoint the registry writes to, from `object_store.endpoint`."
+  registry_storage_class:
+    required_when: "`registry/pvc`"
+    description: "Storage class for the registry volume. Defaults to `cluster.storage.class`, or `single`."
+  registry_storage_size:
+    required_when: "`registry/pvc`"
+    description: "Size of the registry volume. Defaults to `10Gi`."
+  registry_replicas:
+    required_when: "optional"
+    description: "Registry replicas. Two on `topology: ha` where a bucket backs it, otherwise one — a PVC cannot be shared across replicas."
+  omni_account_id:
+    required_when: "always"
+    description: "UUID for `config.account.id`, from `provisioning.omni.account_id` or the `omni-account` Terraform module's state."
+  omni_hostname:
+    required_when: "always"
+    description: "Base hostname Omni's UI/API advertises, from `provisioning.omni.hostname` or derived as `omni.<domain>`."
+  omni_persistence_size:
+    required_when: "always"
+    description: "Size of the volume backing Omni's embedded etcd, secondary SQLite storage, and machine logs. Defaults to `16Gi`."
+  omni_wireguard_node_port:
+    required_when: "`omni/nodeport`"
+    description: "NodePort for the WireGuard Service backing SideroLink. Chart default 30180."
+  omni_wireguard_advertised_endpoint:
+    required_when: "always"
+    description: "host:port machines dial for SideroLink, from `provisioning.omni.wireguard.advertised_endpoint` or derived from the compute module / cluster nodes."
+  omni_initial_admins:
+    required_when: "outside dev mode"
+    description: "Emails seeded as admins on Omni's first start, from `provisioning.omni.initial_admins`."
+  keycloak_saml_url:
+    required_when: "always"
+    description: "Identity's SAML descriptor URL Omni's chart fetches server-side at startup."
+  keycloak_realm:
+    required_when: "always"
+    description: "Identity realm Omni's SAML client registers against."
+
+components:
+  registry:
+    facet: image-factory
+    enable_when: "no external schematic registry is named"
+    description: "In-cluster OCI registry (`distribution`) holding schematics and cached boot assets. Reached at `registry.provisioning.svc.cluster.local:5000` over plain HTTP; no route, and a NetworkPolicy admits only the factory pod on 5000."
+  registry/pvc:
+    facet: image-factory
+    enable_when: "`object_store.driver` is neither `hetzner` nor `aws`"
+    description: "Backs the registry with a PersistentVolumeClaim on the default storage class. Without it the registry is an emptyDir, and a restart loses every schematic id already handed out."
+  registry/s3:
+    facet: image-factory
+    enable_when: "`object_store.driver` is `hetzner` or `aws`"
+    description: "Backs the registry with a bucket from the platform's object store instead of a volume. Limited to the platforms the registry holds credentials for: Hetzner keys come from `hetzner.object_storage`, and on AWS an empty key pair leaves the S3 driver on the instance credential chain. A minio object store stays on a PVC until credentials for one exist."
+  image-factory:
+    facet: image-factory
+    enable_when: "`provisioning.image_factory.enabled == true`"
+    description: "Helm release of the Sidero Labs `image-factory` chart in `provisioning`, from `oci://ghcr.io/siderolabs/charts`. Serves the UI, API, and registry frontends on :8080. Runs as uid 1000, non-root, baseline PSA-compatible. The chart supports only the Recreate deployment strategy."
+  image-factory/ha:
+    facet: image-factory
+    enable_when: "`topology == 'ha'`"
+    description: "Two replicas with pod anti-affinity across nodes. Redundancy against node loss only — the Recreate strategy means rollouts still have a gap. Safe because builds are stateless: schematics live in the registry, cached assets in the cache backend."
+  image-factory/prometheus:
+    facet: image-factory
+    enable_when: "`telemetry.metrics.enabled == true`"
+    description: "Metrics Service on :2122 plus a ServiceMonitor. Both are needed — the chart leaves the metrics Service off by default, so a ServiceMonitor alone would have nothing to scrape."
+  image-factory/gateway:
+    facet: image-factory
+    enable_when: "gateway is enabled"
+    description: "HTTPRoute on Core's canonical `external` Gateway, attached to both the web-http and web-https listeners. One route serves both gateway drivers, since envoy and cilium each implement Gateway API. Lives in the resources tier and depends on `gateway-resources`."
+
+  omni:
+    facet: omni
+    enable_when: "`provisioning.enabled == true`"
+    description: "Helm release of the Sidero Labs `omni` chart in `provisioning`, from `oci://ghcr.io/siderolabs/charts`. The fleet's self-hosted Talos control plane — embedded etcd, own TLS, SideroLink, Keycloak SAML."
+  omni/saml-client:
+    facet: omni
+    enable_when: "always"
+    description: "Job that registers Omni as a SAML client of the platform Keycloak realm over the admin REST API."
+  omni/prometheus:
+    facet: omni
+    enable_when: "`telemetry.metrics.enabled == true`"
+    description: "Metrics Service and ServiceMonitor for Omni's native metrics."
+  omni/nodeport:
+    facet: omni
+    enable_when: "NodePort load-balancer mode (e.g. docker-desktop)"
+    description: "Dedicated NodePort Service for SideroLink WireGuard."
+  omni/loadbalancer:
+    facet: omni
+    enable_when: "load-balancer mode and the gateway driver isn't cilium"
+    description: "Dedicated LoadBalancer Service for SideroLink WireGuard."
+  omni/exporter:
+    facet: omni
+    enable_when: "metrics are enabled and `provisioning.omni.service_account_key` is set"
+    description: "omni_exporter Deployment. Off until an admin creates the Reader-role service account by hand and hands the key to Windsor via a secret() reference."
+  omni/gateway:
+    facet: omni
+    enable_when: "always"
+    description: "HTTPRoutes on Core's canonical `external` Gateway for Omni's UI/API, Kubernetes proxy, and SideroLink machine API. Lives in the resources tier and depends on `gateway-resources`."
+  omni/gateway/wireguard:
+    facet: omni
+    enable_when: "cilium gateway driver and non-NodePort load-balancer mode"
+    description: "A dedicated Gateway sharing the shared gateway's external IP (Cilium `lbipam.cilium.io/sharing-key`) for SideroLink WireGuard, instead of a dedicated Service."
+
+dependencies:
+  pki:
+    required_when: "always"
+    reason: "The factory is served over TLS, and the certificate is issued by the cluster issuer cert-manager installs."
+  gateway:
+    required_when: "`gateway.enabled == true`"
+    reason: "The route CRDs have to exist before the chart renders an Ingress, HTTPRoute, or Gateway."
+  identity:
+    required_when: "always (omni)"
+    reason: "Omni authenticates operators via SAML against Core's Keycloak realm."

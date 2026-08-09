@@ -1,0 +1,1015 @@
+# addon-provisioning.yaml facet tests
+# Covers the image factory (independently, under provisioning.image_factory) and omni
+# (under provisioning.enabled, which also fans identity and the image factory on),
+# each conditional component, the storage the in-cluster registry lands on for every
+# object store the platform resolves to, and exclusion when each half is off.
+#
+# The registry components only appear when no external registry is named, so the cases
+# that exercise them leave provisioning.image_factory.registry unset.
+
+x-defaults:
+  network: &default-network
+    cidr_block: 10.5.0.0/16
+    loadbalancer_driver: kube-vip
+    loadbalancer_mode: arp
+    loadbalancer_ips:
+      start: "10.5.1.10"
+      end: "10.5.1.100"
+
+  cluster: &default-cluster
+    driver: talos
+    controlplanes:
+      nodes:
+        controlplane-1:
+          endpoint: 10.5.0.10:50000
+          node: 10.5.0.10
+          hostname: controlplane-1
+    workers:
+      volumes:
+        - /var/mnt/local
+
+  gateway: &default-gateway
+    enabled: true
+    driver: envoy
+
+  factory: &default-factory
+    enabled: true
+    registry:
+      schematic:
+        registry: registry.example.com
+
+  omni: &default-omni
+    etcd_encryption_key: |
+      -----BEGIN PGP PRIVATE KEY BLOCK-----
+      dGVzdC1rZXktbWF0ZXJpYWw=
+      -----END PGP PRIVATE KEY BLOCK-----
+    # metal defaults SideroLink to a LoadBalancer Service (network.loadbalancer_driver:
+    # kube-vip below); its external IP doesn't exist until the Service is created, so
+    # cases not specifically exercising that derivation supply the override directly.
+    wireguard:
+      advertised_endpoint: 203.0.113.10:50180
+    # The chart refuses to start with zero initial users; cases not specifically
+    # exercising that requirement supply one directly.
+    initial_admins:
+      - admin@example.com
+
+cases:
+  # =============================================================================
+  # Image factory — independent of provisioning.enabled
+  # =============================================================================
+
+  # Baseline: OCI cache, envoy gateway, no metrics, no HA.
+  - name: installs the factory with the gateway route on envoy
+    values:
+      platform: metal
+      network: *default-network
+      cluster: *default-cluster
+      gateway: *default-gateway
+      provisioning:
+        image_factory: *default-factory
+    expect:
+      terraform:
+        - name: image-factory-signing-key
+          path: keys/signing
+      flux:
+        - name: image-factory
+          dependsOn:
+            - pki-install
+            - gateway-install
+          install:
+            components:
+              - image-factory
+            timeout: 10m
+            interval: 5m
+          resources:
+            - components:
+                - image-factory/gateway
+              dependsOn:
+                - gateway-resources
+
+  # Scale-out: replicas and metrics. The cache stays on the in-cluster registry until the
+  # factory's bucket credentials are wired.
+  - name: adds ha and metrics
+    values:
+      platform: metal
+      topology: ha
+      network: *default-network
+      cluster: *default-cluster
+      gateway: *default-gateway
+      telemetry:
+        metrics:
+          enabled: true
+      object_store:
+        enabled: true
+      provisioning:
+        object_store:
+          minio:
+            endpoint: https://minio.system-object-store.svc:9000
+        image_factory:
+          enabled: true
+          registry:
+            schematic:
+              registry: registry.example.com
+    expect:
+      flux:
+        - name: image-factory
+          dependsOn:
+            - pki-install
+            - gateway-install
+          install:
+            components:
+              - image-factory
+              - image-factory/ha
+              - image-factory/prometheus
+
+  # Metrics on: the manager-observability contribution (alerts + dashboard) lands
+  # alongside image-factory/prometheus.
+  - name: adds the manager-observability contribution when metrics are enabled
+    values:
+      platform: metal
+      network: *default-network
+      cluster: *default-cluster
+      gateway: *default-gateway
+      telemetry:
+        metrics:
+          enabled: true
+      provisioning:
+        image_factory: *default-factory
+    expect:
+      flux:
+        - name: image-factory
+          install:
+            components:
+              - image-factory
+              - image-factory/prometheus
+        - name: manager-observability
+          resources:
+            - components:
+                - prometheus/alerts/image-factory
+                - grafana/dashboards/image-factory
+
+  # No metrics: neither the ServiceMonitor nor the manager-observability contribution
+  # (which reads the factory's own metrics) has anything to scrape.
+  - name: leaves manager-observability out without metrics enabled
+    values:
+      platform: metal
+      network: *default-network
+      cluster: *default-cluster
+      gateway: *default-gateway
+      # Explicit false, not just omitted: config-observability's own manager-observability
+      # entry defaults telemetry.metrics.enabled to true, so leaving it unset would still
+      # produce the (otherwise-empty) system and this exclude would fail for the wrong reason.
+      telemetry:
+        metrics:
+          enabled: false
+      provisioning:
+        image_factory: *default-factory
+    expect:
+      flux:
+        - name: image-factory
+          install:
+            components:
+              - image-factory
+    exclude:
+      flux:
+        - name: manager-observability
+
+  # In-cluster registry with nothing to back it: a PVC on the default storage class.
+  - name: backs the in-cluster registry with a pvc when no object store resolves
+    values:
+      id: tst1
+      platform: metal
+      network: *default-network
+      cluster: *default-cluster
+      provisioning:
+        image_factory:
+          enabled: true
+    expect:
+      flux:
+        - name: image-factory
+          install:
+            components:
+              - image-factory
+              - registry
+              - registry/pvc
+            substitutions:
+              registry_endpoint: ""
+              registry_replicas: "1"
+
+  # Core's minio operator creates no Tenant and the schema carries no keys for one, so the
+  # registry stays on a PVC rather than pointing at a bucket it cannot authenticate to.
+  - name: keeps the registry on a pvc when the object store is minio
+    values:
+      id: tst1
+      platform: metal
+      network: *default-network
+      cluster: *default-cluster
+      object_store:
+        enabled: true
+      provisioning:
+        object_store:
+          minio:
+            endpoint: https://minio.system-object-store.svc:9000
+        image_factory:
+          enabled: true
+    expect:
+      flux:
+        - name: image-factory
+          install:
+            components:
+              - image-factory
+              - registry
+              - registry/pvc
+            substitutions:
+              # Resolved, but unread: registry/s3 is the only component that consumes it,
+              # and the pvc branch is what a minio driver selects.
+              registry_endpoint: https://minio.system-object-store.svc:9000
+              registry_replicas: "1"
+
+  # A platform with its own object storage needs no addon to reach s3, and the bucket
+  # name has to match the one config-object-store provisions. The env credential fallback
+  # is what lets this resolve at all — see config-object-store's own hetzner case.
+  - name: derives the bucket, region, and endpoint from the platform on hetzner
+    env:
+      HETZNER_S3_ACCESS_KEY: test-access
+      HETZNER_S3_SECRET_KEY: test-secret
+    values:
+      id: tst1
+      platform: hetzner
+      hetzner:
+        token: dummy-token
+        location: fsn1
+        network_zone: eu-central
+      network: *default-network
+      cluster: *default-cluster
+      provisioning:
+        image_factory:
+          enabled: true
+    expect:
+      flux:
+        - name: image-factory
+          install:
+            components:
+              - image-factory
+              - registry
+              - registry/s3
+            substitutions:
+              registry_bucket: windsor-tst1-image-factory
+              registry_region: fsn1
+              registry_endpoint: https://fsn1.your-objectstorage.com
+
+  # Same shape as the hetzner case above, on the platform where object storage needs no
+  # addon to reach s3.
+  - name: derives the bucket, region, and endpoint from the platform on aws
+    values:
+      id: tst1
+      platform: aws
+      network: *default-network
+      cluster: *default-cluster
+      aws:
+        region: us-west-2
+      provisioning:
+        image_factory:
+          enabled: true
+    expect:
+      terraform:
+        - name: object-store
+          path: object-store/aws
+          inputs:
+            buckets:
+              - windsor-tst1-image-factory
+      flux:
+        - name: image-factory
+          install:
+            components:
+              - image-factory
+              - registry
+              - registry/s3
+            substitutions:
+              registry_bucket: windsor-tst1-image-factory
+              registry_region: us-west-2
+              registry_endpoint: https://s3.us-west-2.amazonaws.com
+
+  # Replicas only scale out where the backing store is shared; a PVC cannot take two.
+  - name: scales the registry out only when object storage backs it
+    values:
+      id: tst1
+      platform: aws
+      topology: ha
+      network: *default-network
+      cluster: *default-cluster
+      aws:
+        region: us-west-2
+      provisioning:
+        image_factory:
+          enabled: true
+    expect:
+      flux:
+        - name: image-factory
+          install:
+            substitutions:
+              registry_replicas: "2"
+
+  # No gateway: the factory still installs, just with no external route.
+  - name: installs without a route when no gateway is enabled
+    values:
+      platform: metal
+      network: *default-network
+      cluster: *default-cluster
+      provisioning:
+        image_factory: *default-factory
+    expect:
+      flux:
+        - name: image-factory
+          dependsOn:
+            - pki-install
+          install:
+            components:
+              - image-factory
+
+  # Operator-supplied key: the signing-key module is skipped entirely.
+  - name: skips the signing key module when a key is supplied
+    values:
+      platform: metal
+      network: *default-network
+      cluster: *default-cluster
+      provisioning:
+        image_factory:
+          enabled: true
+          cache_signing_key: supplied-by-operator
+          registry:
+            schematic:
+              registry: registry.example.com
+    expect:
+      terraform: []
+      flux:
+        - name: image-factory
+          install:
+            components:
+              - image-factory
+
+  # Off by default, and provisioning itself off: excludes both systems.
+  - name: excludes everything when provisioning and the image factory are both disabled
+    values:
+      platform: metal
+      network: *default-network
+      cluster: *default-cluster
+      provisioning:
+        image_factory:
+          enabled: false
+    expect:
+      flux: []
+
+  # =============================================================================
+  # Omni — provisioning.enabled, which also fans identity and the image factory on
+  # =============================================================================
+
+  # Baseline: provisioning on, no dns.public_domain — hostname derives from the private
+  # domain, image factory falls back to the public factory since it's off.
+  - name: installs omni with derived hostname and no image factory
+    values:
+      platform: metal
+      network: *default-network
+      cluster: *default-cluster
+      dns:
+        private_domain: cluster.local
+      identity:
+        enabled: true
+      # provisioning.enabled fans image_factory on by default; opt out explicitly to
+      # exercise the public-factory fallback.
+      provisioning:
+        enabled: true
+        image_factory:
+          enabled: false
+        omni: *default-omni
+    expect:
+      terraform:
+        - name: omni-account
+          path: ids/omni-account
+      flux:
+        - name: omni
+          dependsOn:
+            - identity-resources
+          install:
+            components:
+              - omni
+              - omni/saml-client
+            substitutions:
+              omni_hostname: omni.cluster.local
+              omni_kube_proxy_hostname: omni-kube.cluster.local
+              omni_machine_api_hostname: omni-siderolink.cluster.local
+              omni_persistence_size: 16Gi
+              omni_image_factory_url: https://factory.talos.dev
+            timeout: 10m
+            interval: 5m
+          resources:
+            - dependsOn:
+                - gateway-resources
+              components:
+                - omni/gateway
+              substitutions:
+                external_domain: cluster.local
+
+  # An operator's explicit external_url always wins over the in-cluster default —
+  # e.g. a factory that isn't running in this cluster at all.
+  - name: honors an explicit image factory external_url override
+    values:
+      platform: metal
+      network: *default-network
+      cluster: *default-cluster
+      dns:
+        private_domain: cluster.local
+      identity:
+        enabled: true
+      provisioning:
+        enabled: true
+        image_factory:
+          enabled: true
+          external_url: https://factory.example.com
+          registry:
+            schematic:
+              registry: registry.example.com
+        omni: *default-omni
+    expect:
+      flux:
+        - name: omni
+          install:
+            substitutions:
+              omni_image_factory_url: https://factory.example.com
+
+  # Operator-supplied account ID: the terraform module is skipped entirely.
+  - name: skips the account id module when an id is supplied
+    values:
+      platform: metal
+      network: *default-network
+      cluster: *default-cluster
+      dns:
+        private_domain: cluster.local
+      identity:
+        enabled: true
+      provisioning:
+        enabled: true
+        omni:
+          <<: *default-omni
+          account_id: 550e8400-e29b-41d4-a716-446655440000
+    expect:
+      terraform: []
+      flux:
+        - name: omni
+          install:
+            substitutions:
+              omni_account_id: 550e8400-e29b-41d4-a716-446655440000
+
+  # Explicit hostname override and a self-hosted image factory both flow through.
+  - name: honors an explicit hostname and points at the self-hosted image factory
+    values:
+      platform: metal
+      network: *default-network
+      cluster: *default-cluster
+      dns:
+        private_domain: cluster.local
+      identity:
+        enabled: true
+      provisioning:
+        enabled: true
+        image_factory:
+          enabled: true
+          registry:
+            schematic:
+              registry: registry.example.com
+        omni:
+          <<: *default-omni
+          hostname: omni.fleet.example.com
+    expect:
+      flux:
+        - name: omni
+          install:
+            substitutions:
+              # kube-proxy/machine-api are fixed siblings under dns.domain (they
+              # have to fit the gateway's own wildcard cert SAN), not subdomains of
+              # a possibly-arbitrary custom omni.hostname.
+              omni_hostname: omni.fleet.example.com
+              omni_kube_proxy_hostname: omni-kube.cluster.local
+              omni_machine_api_hostname: omni-siderolink.cluster.local
+              omni_image_factory_url: https://factory.cluster.local
+
+  # telemetry.metrics.enabled adds the metrics component.
+  - name: adds the prometheus component when metrics are enabled
+    values:
+      platform: metal
+      network: *default-network
+      cluster: *default-cluster
+      dns:
+        private_domain: cluster.local
+      identity:
+        enabled: true
+      telemetry:
+        metrics:
+          enabled: true
+      provisioning:
+        enabled: true
+        omni: *default-omni
+    expect:
+      flux:
+        - name: omni
+          install:
+            components:
+              - omni
+              - omni/saml-client
+              - omni/prometheus
+          resources:
+            - components:
+                - omni/gateway
+        - name: manager-observability
+          resources:
+            - components:
+                - prometheus/alerts/omni
+                - grafana/dashboards/omni
+
+  # provisioning.omni.service_account_key alone isn't enough -- omni/exporter also
+  # needs telemetry.metrics.enabled, same as omni/prometheus, since its ServiceMonitor
+  # needs the prometheus-operator CRDs.
+  - name: leaves the exporter out without metrics enabled
+    values:
+      platform: metal
+      network: *default-network
+      cluster: *default-cluster
+      dns:
+        private_domain: cluster.local
+      identity:
+        enabled: true
+      provisioning:
+        enabled: true
+        omni:
+          <<: *default-omni
+          service_account_key: dGVzdC1rZXk=
+    expect:
+      flux:
+        - name: omni
+          install:
+            components:
+              - omni
+              - omni/saml-client
+
+  # Both telemetry.metrics.enabled and provisioning.omni.service_account_key add the
+  # exporter.
+  - name: adds the exporter component once a service account key is supplied
+    values:
+      platform: metal
+      network: *default-network
+      cluster: *default-cluster
+      dns:
+        private_domain: cluster.local
+      identity:
+        enabled: true
+      telemetry:
+        metrics:
+          enabled: true
+      provisioning:
+        enabled: true
+        omni:
+          <<: *default-omni
+          service_account_key: dGVzdC1rZXk=
+    expect:
+      flux:
+        - name: omni
+          install:
+            components:
+              - omni
+              - omni/saml-client
+              - omni/prometheus
+              - omni/exporter
+
+  # Custom persistence size and wireguard advertised endpoint both flow through.
+  - name: honors persistence size and wireguard advertised endpoint overrides
+    values:
+      platform: metal
+      network: *default-network
+      cluster: *default-cluster
+      dns:
+        private_domain: cluster.local
+      identity:
+        enabled: true
+      provisioning:
+        enabled: true
+        omni:
+          <<: *default-omni
+          persistence_size: 32Gi
+          wireguard:
+            advertised_endpoint: 203.0.113.10:30180
+    expect:
+      flux:
+        - name: omni
+          install:
+            substitutions:
+              omni_persistence_size: 32Gi
+              omni_wireguard_advertised_endpoint: 203.0.113.10:30180
+
+  # Missing the GPG-armored etcd encryption key fails composition outside dev mode —
+  # Terraform cannot generate one (no provider does), so it is always operator-supplied.
+  - name: fails without an etcd encryption key
+    values:
+      platform: metal
+      network: *default-network
+      cluster: *default-cluster
+      dns:
+        private_domain: cluster.local
+      identity:
+        enabled: true
+      provisioning:
+        enabled: true
+    expectError: true
+
+  # dev mode falls back to a fixed dev-only key, the same shape as Core's dev admin
+  # password — no key required from the operator.
+  - name: dev mode supplies a default etcd encryption key
+    values:
+      dev: true
+      platform: metal
+      network: *default-network
+      cluster: *default-cluster
+      dns:
+        private_domain: cluster.local
+      identity:
+        enabled: true
+      provisioning:
+        enabled: true
+        omni:
+          wireguard:
+            advertised_endpoint: 203.0.113.10:50180
+    expect:
+      flux:
+        - name: omni
+          install:
+            components:
+              - omni
+              - omni/saml-client
+            substitutions:
+              # Core's own dev admin (keycloak/realm/dev-user), so a SAML login
+              # with that identity is recognized immediately.
+              omni_initial_admins: "[admin@local.test]"
+
+  # A cloud-managed LoadBalancer controller's external IP is unknowable before the
+  # Service exists (aws here; hetzner/azure are the same shape), so outside dev mode
+  # this is a genuine two-phase "apply once, then set the real IP" operator step (see
+  # the earlier explicit-override test). Under dev == true a placeholder fills in
+  # instead — colima, CI, and any other dev context converge without it, since
+  # nothing dev mode drives ever reads the value back. Local/on-prem LB platforms
+  # (the next test) don't need this at all — their address derives statically.
+  - name: dev mode supplies a placeholder wireguard advertised endpoint
+    values:
+      dev: true
+      platform: aws
+      aws:
+        region: us-west-2
+      network: *default-network
+      cluster: *default-cluster
+      dns:
+        private_domain: cluster.local
+      identity:
+        enabled: true
+      provisioning:
+        enabled: true
+    expect:
+      flux:
+        - name: omni
+          install:
+            substitutions:
+              omni_wireguard_advertised_endpoint: "0.0.0.0:30180"
+
+  # Local/on-prem LoadBalancer platforms don't need dev mode or an operator override
+  # at all: the gateway's own address (network.loadbalancer_ips.start) is pinned via
+  # a static annotation (lbipam.cilium.io/ips or envoy's loadBalancerIP), known at
+  # blueprint-compose time — no "apply once, then set the real IP" dance. Routes
+  # through the shared gateway (omni/gateway/wireguard), not a dedicated Service.
+  - name: derives the wireguard endpoint through the gateway on a local LoadBalancer
+    values:
+      platform: metal
+      network: *default-network
+      cluster: *default-cluster
+      dns:
+        private_domain: cluster.local
+      identity:
+        enabled: true
+      provisioning:
+        enabled: true
+        omni:
+          etcd_encryption_key: |
+            -----BEGIN PGP PRIVATE KEY BLOCK-----
+            dGVzdC1rZXktbWF0ZXJpYWw=
+            -----END PGP PRIVATE KEY BLOCK-----
+          initial_admins:
+            - admin@example.com
+    expect:
+      flux:
+        - name: omni
+          install:
+            substitutions:
+              omni_wireguard_advertised_endpoint: "10.5.1.10:30180"
+          resources:
+            - dependsOn:
+                - gateway-resources
+              components:
+                - omni/gateway
+                - omni/gateway/wireguard
+
+  # envoy driver keeps the chart's own dedicated LoadBalancer Service — gateway-routed
+  # wireguard is cilium-only for now (docs/adr/0005). The Service's own IP is
+  # unknowable ahead of an apply, same as ADR-0004's original design, so dev mode's
+  # placeholder covers it.
+  - name: keeps the dedicated LoadBalancer Service on the envoy driver
+    values:
+      dev: true
+      platform: metal
+      gateway:
+        driver: envoy
+      network: *default-network
+      cluster: *default-cluster
+      dns:
+        private_domain: cluster.local
+      identity:
+        enabled: true
+      provisioning:
+        enabled: true
+    expect:
+      flux:
+        - name: omni
+          install:
+            components:
+              - omni
+              - omni/saml-client
+              - omni/loadbalancer
+            substitutions:
+              omni_wireguard_advertised_endpoint: "0.0.0.0:30180"
+
+  # docker-desktop defaults SideroLink to NodePort, so the advertised endpoint derives
+  # from the first control-plane's own node IP and the chart's default NodePort — no
+  # operator override needed.
+  - name: derives the wireguard endpoint on docker-desktop from the control-plane node
+    values:
+      platform: docker
+      network: *default-network
+      cluster: *default-cluster
+      dns:
+        private_domain: cluster.local
+      identity:
+        enabled: true
+      provisioning:
+        enabled: true
+        omni:
+          etcd_encryption_key: |
+            -----BEGIN PGP PRIVATE KEY BLOCK-----
+            dGVzdC1rZXktbWF0ZXJpYWw=
+            -----END PGP PRIVATE KEY BLOCK-----
+          initial_admins:
+            - admin@example.com
+      workstation:
+        runtime: docker-desktop
+    terraformOutputs:
+      compute:
+        controlplanes:
+          - endpoint: 10.5.0.10:6443
+            node: 10.5.0.10
+            hostname: controlplane-1
+        workers: []
+      workstation: {}
+    expect:
+      flux:
+        - name: omni
+          install:
+            components:
+              - omni
+              - omni/saml-client
+              - omni/nodeport
+            substitutions:
+              omni_wireguard_advertised_endpoint: 10.5.0.10:30180
+          resources:
+            - dependsOn:
+                - gateway-resources
+              components:
+                - omni/gateway
+      config:
+        cluster:
+          controlplanes:
+            hostports:
+              - "8080:30080/tcp"
+              - "8443:30443/tcp"
+              - "30180:30180/udp"
+          workers:
+            hostports:
+              - "8080:30080/tcp"
+              - "8443:30443/tcp"
+              - "30180:30180/udp"
+
+  # provisioning.omni.wireguard.node_port overrides the chart's default (30180) on a
+  # port conflict — the substitution, the advertised endpoint derivation, and the
+  # docker-desktop hostport publish all have to stay in sync with the same override.
+  - name: honors a custom wireguard node_port on docker-desktop
+    values:
+      platform: docker
+      network: *default-network
+      cluster: *default-cluster
+      dns:
+        private_domain: cluster.local
+      identity:
+        enabled: true
+      provisioning:
+        enabled: true
+        omni:
+          etcd_encryption_key: |
+            -----BEGIN PGP PRIVATE KEY BLOCK-----
+            dGVzdC1rZXktbWF0ZXJpYWw=
+            -----END PGP PRIVATE KEY BLOCK-----
+          initial_admins:
+            - admin@example.com
+          wireguard:
+            node_port: 31000
+      workstation:
+        runtime: docker-desktop
+    terraformOutputs:
+      compute:
+        controlplanes:
+          - endpoint: 10.5.0.10:6443
+            node: 10.5.0.10
+            hostname: controlplane-1
+        workers: []
+      workstation: {}
+    expect:
+      flux:
+        - name: omni
+          install:
+            substitutions:
+              omni_wireguard_node_port: 31000
+              omni_wireguard_advertised_endpoint: 10.5.0.10:31000
+      config:
+        cluster:
+          controlplanes:
+            hostports:
+              - "8080:30080/tcp"
+              - "8443:30443/tcp"
+              - "31000:31000/udp"
+          workers:
+            hostports:
+              - "8080:30080/tcp"
+              - "8443:30443/tcp"
+              - "31000:31000/udp"
+
+  # provisioning off: omni stays off. image_factory not set here either, so the whole
+  # facet contributes nothing.
+  - name: excludes omni when provisioning is disabled
+    values:
+      platform: metal
+      network: *default-network
+      cluster: *default-cluster
+      dns:
+        private_domain: cluster.local
+      provisioning:
+        enabled: false
+        omni: *default-omni
+    expect:
+      flux: []
+
+  # Omni's UI/API, kube-proxy, and machine API routes need the shared gateway.
+  - name: fails without the gateway enabled
+    values:
+      platform: metal
+      network: *default-network
+      cluster: *default-cluster
+      dns:
+        private_domain: cluster.local
+      identity:
+        enabled: true
+      provisioning:
+        enabled: true
+      gateway:
+        enabled: false
+      omni: *default-omni
+    expectError: true
+
+  # =============================================================================
+  # provisioning.enabled fan-out — identity and the image factory
+  # =============================================================================
+
+  # The switch on its own brings up both dependencies, without the operator naming
+  # either: Core's identity system (server, platform realm) and its database, plus the
+  # image factory. This is the full transitive chain, not just the top-level flags.
+  - name: enabling provisioning pulls up identity and the image factory
+    values:
+      id: tst1
+      platform: metal
+      network: *default-network
+      cluster: *default-cluster
+      gateway: *default-gateway
+      provisioning:
+        enabled: true
+        omni:
+          etcd_encryption_key: dummy-gpg-key
+          wireguard:
+            advertised_endpoint: 203.0.113.10:50180
+          initial_admins:
+            - admin@example.com
+    expect:
+      flux:
+        - name: identity
+          install:
+            components:
+              - keycloak-operator
+          resources:
+            - components:
+                - keycloak
+                - keycloak/realm
+        - name: database
+          install:
+            components:
+              - cloudnativepg
+        - name: image-factory
+          install:
+            components:
+              - image-factory
+
+  # An operator's explicit opt-out is never overridden by the fan-out — identity stays
+  # off, but the image factory (the other half of the switch) still comes up.
+  - name: an explicit identity opt-out survives the fan-out
+    values:
+      id: tst1
+      platform: metal
+      network: *default-network
+      cluster: *default-cluster
+      gateway: *default-gateway
+      provisioning:
+        enabled: true
+        omni:
+          etcd_encryption_key: dummy-gpg-key
+          wireguard:
+            advertised_endpoint: 203.0.113.10:50180
+          initial_admins:
+            - admin@example.com
+      identity:
+        enabled: false
+    expect:
+      flux:
+        - name: image-factory
+    exclude:
+      flux:
+        - name: identity
+
+  # Same for the other half: an explicit image-factory opt-out survives, identity still
+  # comes up.
+  - name: an explicit image-factory opt-out survives the fan-out
+    values:
+      id: tst1
+      platform: metal
+      network: *default-network
+      cluster: *default-cluster
+      gateway: *default-gateway
+      provisioning:
+        enabled: true
+        image_factory:
+          enabled: false
+        omni:
+          etcd_encryption_key: dummy-gpg-key
+          wireguard:
+            advertised_endpoint: 203.0.113.10:50180
+          initial_admins:
+            - admin@example.com
+    expect:
+      flux:
+        - name: identity
+    exclude:
+      flux:
+        - name: image-factory
+
+  # =============================================================================
+  # provisioning.object_store resolution
+  # =============================================================================
+
+  # No managed object storage and no in-cluster operator: nothing to provision.
+  #
+  # This and the minio case below assert an empty terraform list, which the runner
+  # subset-matches — an empty expectation holds against any actual list, so neither case
+  # can fail. They document intent only. What proves a minio driver resolved is the
+  # registry landing on a PVC in the image-factory cases above; what proves hetzner and
+  # aws resolve is the "derives the bucket..." cases above. A real negative here needs
+  # absence assertions.
+  - name: resolves to no object store on a bare platform
+    values:
+      platform: metal
+      network: *default-network
+      cluster: *default-cluster
+    expect:
+      terraform: []
+
+  # Core's operator standing in for a managed backend. object_store.enabled/minio are
+  # Core's own raw operator toggle (flat, not under provisioning) — see the comment
+  # above the config: entry that reads it.
+  - name: resolves to minio when the core addon is enabled
+    values:
+      platform: metal
+      network: *default-network
+      cluster: *default-cluster
+      object_store:
+        enabled: true
+        minio:
+          endpoint: https://minio.system-object-store.svc:9000
+    expect:
+      terraform: []
