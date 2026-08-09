@@ -1,7 +1,7 @@
 # config-observability.yaml facet tests
 # Covers the manager-observability Kustomization itself. What actually lands in its
 # components list is exercised by each contributor's own test file (e.g.
-# addon-omni.test.yaml's "adds the prometheus component..." case) — this file only
+# addon-provisioning.test.yaml's "adds the prometheus component..." case) — this file only
 # proves the domain exists and is gated correctly, since asserting an empty
 # components list here can't fail either way (see the note on subset-matching in
 # config-object-store.test.yaml).

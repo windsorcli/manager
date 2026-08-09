@@ -1,9 +1,9 @@
 # Omni SideroLink registration test
 
 Boots a local QEMU Talos VM and registers it with a locally running Omni over
-SideroLink — proving `addon-omni.yaml`'s SideroLink path actually works end to end,
-not just that the Helm chart installs. This is a manual/local verification tool, not
-part of `task test`.
+SideroLink — proving `addon-provisioning.yaml`'s omni SideroLink path actually works
+end to end, not just that the Helm chart installs. This is a manual/local
+verification tool, not part of `task test`.
 
 **Procedure: bring the management cluster up first, then run this against it.**
 

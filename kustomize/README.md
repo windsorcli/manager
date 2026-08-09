@@ -14,5 +14,5 @@ Reference index for the Kustomize add-ons in this blueprint. See
 
 | Path | Purpose |
 |---|---|
-| [image-factory](image-factory/) | Self-hosted Talos image factory for generating schematics and boot assets. |
+| [provisioning](provisioning/) | Downstream cluster provisioning — self-hosted Talos image factory and Sidero Omni, turned on together by provisioning.enabled. |
 <!-- END_INDEX -->

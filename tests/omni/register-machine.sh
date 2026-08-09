@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 #
 # register-machine.sh - Boot a local QEMU Talos VM and register it with the local Omni
-# instance over SideroLink, proving addon-omni.yaml's SideroLink path works end to end.
+# instance over SideroLink, proving addon-provisioning.yaml's omni SideroLink path works
+# end to end.
 #
 # Background: docs/spikes/omni-docker-machine-registration.md has the full story of why
 # this exists in this shape. In short: a Docker container can't complete a SideroLink

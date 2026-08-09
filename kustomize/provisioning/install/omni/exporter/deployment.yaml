@@ -1,0 +1,102 @@
+# Off until provisioning.omni.service_account_key is set (addon-provisioning.yaml
+# component gate) --
+# unlike the rest of this facet, the exporter is Reader-role only, needs no Kubernetes
+# RBAC of its own (it never talks to the Kubernetes API, only Omni's), and the service
+# account it authenticates with can't be provisioned by anything in this repo: an admin
+# has to run `omnictl serviceaccount create --use-user-role=false --role=Reader
+# omni-exporter` by hand after first login, then set omni.service_account_key via a
+# secret() reference.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: omni-exporter
+  namespace: provisioning
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: omni-exporter
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: omni-exporter
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: omni-exporter
+          # renovate: datasource=docker depName=omni_exporter package=ghcr.io/siderolabs/omni_exporter
+          image: ghcr.io/siderolabs/omni_exporter:v0.1.0@sha256:584ea21f2078673e0aa3a552491718affe6f75a84fbbe5651f5649d21056563c
+          env:
+            # In-cluster, plain h2c (no TLS) — the chart's own "omni" Service, not the
+            # external gateway hostname. Routing a server-side caller through the
+            # gateway is unnecessary and was confirmed live to fail; same reasoning as
+            # keycloak_saml_url's own internal backchannel_issuer in this facet.
+            - name: OMNI_ENDPOINT
+              value: http://omni.provisioning:8080
+            - name: OMNI_SERVICE_ACCOUNT_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: omni-service-account-key
+                  key: key
+          ports:
+            - name: metrics
+              containerPort: 10048
+          # / is the static landing page -- unlike /metrics, it doesn't invoke the
+          # collector, so probes don't compete with real scrapes for the exporter's
+          # own 3-concurrent-scrape budget.
+          livenessProbe:
+            httpGet:
+              path: /
+              port: metrics
+            initialDelaySeconds: 5
+          readinessProbe:
+            httpGet:
+              path: /
+              port: metrics
+          resources:
+            requests:
+              cpu: 20m
+              memory: 32Mi
+            limits:
+              memory: 128Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: omni-exporter
+  namespace: provisioning
+  labels:
+    app.kubernetes.io/name: omni-exporter
+spec:
+  selector:
+    app.kubernetes.io/name: omni-exporter
+  ports:
+    - name: metrics
+      port: 10048
+      targetPort: metrics
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: omni-exporter
+  namespace: provisioning
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: omni-exporter
+  endpoints:
+    - port: metrics
+      path: /metrics
+      interval: 30s

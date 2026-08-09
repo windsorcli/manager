@@ -13,9 +13,9 @@ metadata:
 # collides across sources, not the path, and the directory name is what operators
 # actually read.
 #
-# See addon-omni.yaml for the omni-specific contributions (prometheus/alerts/omni,
-# grafana/dashboards/omni) — this facet only establishes the Kustomization itself;
-# empty here on its own.
+# See addon-provisioning.yaml for the image-factory/omni-specific contributions
+# (prometheus/alerts/*, grafana/dashboards/*) — this facet only establishes the
+# Kustomization itself; empty here on its own.
 flux:
   - name: manager-observability
     path: observability

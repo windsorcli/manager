@@ -32,89 +32,13 @@ type: object
 
 properties:
 
-  # Sibling of Core's enabled/driver on the same block. Nested under minio, not a flat
-  # sibling of driver, because config-object-store.yaml computes its own flat driver and
-  # endpoint on this same object_store key — a raw operator field of the same name would
-  # collide with that computed value.
-  object_store:
-    type: object
-    properties:
-      minio:
-        type: object
-        properties:
-          endpoint:
-            type: string
-            description: S3 endpoint of the MinIO Tenant serving buckets. Core's addon installs the operator but creates no Tenant, so on platforms with no managed object storage this has to be given explicitly.
-        additionalProperties: false
-
-  # Self-hosted Talos image/schematic generation. Independently enable-able — a single
-  # cluster wanting air-gapped, version-pinned Talos assets needs this without needing
-  # provisioning. config-provisioning.yaml fans this on as a dependency, the same way
-  # Core's identity turns on its database.
-  image_factory:
-    type: object
-    properties:
-      enabled:
-        type: boolean
-        default: false
-        description: Enable the self-hosted Talos image factory.
-      external_url:
-        type: string
-        description: Base URL the factory publishes in download links and installer references. Derived from the domain when unset; set it where the gateway is reached on a non-standard port or through another name.
-      registry_size:
-        type: string
-        default: 10Gi
-        description: Size of the volume backing the in-cluster registry, where no object storage exists. Holds schematics and cached boot assets.
-      max_concurrency:
-        type: integer
-        minimum: 1
-        default: 6
-        description: Simultaneous asset builds. Each build is CPU-heavy; raise it with the node pool, not ahead of it.
-      min_talos_version:
-        type: string
-        default: "1.2.0"
-        description: Oldest Talos release the factory will generate assets for.
-      cache_signing_key:
-        type: string
-        sensitive: true
-        description: ECDSA private key used to sign cached boot assets so nodes can verify what the factory serves. Generate with `openssl ecparam -name prime256v1 -genkey -noout`. Set via a secret() reference.
-      registry:
-        type: object
-        properties:
-          schematic:
-            type: object
-            properties:
-              registry:
-                type: string
-                description: OCI registry the factory writes generated schematics to. It needs push access; this is not a mirror.
-              namespace:
-                type: string
-                default: siderolabs/image-factory
-                description: Repository path prefix for schematics.
-              repository:
-                type: string
-                default: schematics
-                description: Repository name for schematics.
-              insecure:
-                type: boolean
-                default: false
-                description: Allow HTTP or invalid TLS to the schematic registry.
-            additionalProperties: false
-          installer:
-            type: object
-            properties:
-              repository:
-                type: string
-                default: installer
-                description: Repository name the factory pushes built installer images to, on the same registry as schematic.
-            additionalProperties: false
-        additionalProperties: false
-        description: Registries the factory reads from and writes to.
-    additionalProperties: false
-    description: Self-hosted Talos image factory
-
-  # How this fleet provisions and manages downstream clusters. See config-provisioning.yaml
-  # for what enabling it turns on.
+  # Downstream cluster provisioning: the image factory and Omni, grouped under one
+  # namespace since both are part of the same provisioning pipeline. `enabled` is the
+  # umbrella switch addon-provisioning.yaml's own config: block fans out from (turning
+  # on identity and image_factory together); image_factory and omni still toggle
+  # independently under it — provisioning.image_factory.enabled works with
+  # provisioning.enabled left false, for a single cluster that wants air-gapped,
+  # version-pinned Talos assets without fleet-wide provisioning.
   provisioning:
     type: object
     properties:
@@ -122,54 +46,139 @@ properties:
         type: boolean
         default: false
         description: Enable the self-hosted Omni management plane and the capabilities it depends on (identity, image factory).
-    additionalProperties: false
 
-  # Self-hosted Sidero Omni, the fleet's Talos control plane. See addon-omni.yaml for
-  # the deployment shape (embedded etcd, own TLS, SideroLink, Keycloak SAML).
-  omni:
-    type: object
-    properties:
-      hostname:
-        type: string
-        description: Base hostname Omni's UI/API advertises. Derived as omni.<domain> when unset; the Kubernetes proxy and SideroLink machine API endpoints are derived from this same base (kubernetes.<hostname>, siderolink.<hostname>).
-      account_id:
-        type: string
-        description: UUID for config.account.id. Must not change for the lifetime of the installation. Terraform-generated and held in state when unset.
-      wireguard:
+      # Object storage backing the image factory's in-cluster registry. Nested under
+      # minio, not a flat sibling of driver, because addon-provisioning.yaml computes
+      # its own driver/endpoint/region/prefix onto this same object_store key — a raw
+      # operator field of the same name would collide with that computed value. This is
+      # a separate tree from Core's own flat object_store.enabled/driver (its minio
+      # operator toggle); addon-provisioning.yaml reads that one to decide whether
+      # minio is available, but writes its own resolution here. image_factory is the
+      # only consumer, so this lives under provisioning rather than as its own
+      # top-level key.
+      object_store:
         type: object
         properties:
-          service_type:
-            type: string
-            enum:
-              - NodePort
-              - LoadBalancer
-            description: Kubernetes Service type fronting SideroLink's WireGuard port. Defaults to NodePort on docker-desktop and LoadBalancer everywhere else.
-          advertised_endpoint:
-            type: string
-            description: host:port machines dial for SideroLink, overriding the derived hostname/NodePort. Changing this after machines have joined requires re-provisioning them.
-          node_port:
-            type: integer
-            description: NodePort for the WireGuard Service (chart default 30180). Override on a port conflict; also republishes as the docker-desktop hostport.
+          minio:
+            type: object
+            properties:
+              endpoint:
+                type: string
+                description: S3 endpoint of the MinIO Tenant serving buckets. Core's addon installs the operator but creates no Tenant, so on platforms with no managed object storage this has to be given explicitly.
+            additionalProperties: false
         additionalProperties: false
-      persistence_size:
-        type: string
-        default: 16Gi
-        description: Size of the volume backing Omni's embedded etcd, secondary SQLite storage, and machine logs.
-      etcd_encryption_key:
-        type: string
-        sensitive: true
-        description: ASCII-armored GPG private key Omni uses to decrypt its etcd master key (config.storage.default.etcd.privateKeySource). Generate with `(export GNUPGHOME=$(mktemp -d); gpg --batch --passphrase '' --quick-gen-key x; gpg -a --export-secret-key > omni.asc; rm -rf $GNUPGHOME)`. Set via a secret() reference. Required outside dev mode; dev mode falls back to a fixed key checked into the facet.
-      initial_admins:
-        type: array
-        items:
-          type: string
-        description: Emails seeded as admins on Omni's first start (config.auth.initialUsers), before Keycloak SAML group membership grants any role. Bootstrap only, not how production access is granted. The chart refuses to start with none at all — required outside dev mode; dev mode seeds a fixed placeholder. Deliberately no default here — a schema default would be materialized ahead of the facet's own null-coalescing fallback, permanently masking the dev-mode default.
-      service_account_key:
-        type: string
-        sensitive: true
-        description: Base64-encoded Omni service account key for the omni_exporter Deployment (client.WithServiceAccount). Nothing in this repo can create it — Omni has no non-interactive bootstrap credential, only SAML/WebAuthn/Auth0 login, so an admin has to log in once and run `omnictl serviceaccount create --use-user-role=false --role=Reader omni-exporter`, then set this via a secret() reference. Unset leaves the exporter Deployment out entirely; nothing else in this facet depends on it.
+
+      # Self-hosted Talos image/schematic generation.
+      image_factory:
+        type: object
+        properties:
+          enabled:
+            type: boolean
+            default: false
+            description: Enable the self-hosted Talos image factory.
+          external_url:
+            type: string
+            description: Base URL the factory publishes in download links and installer references. Derived from the domain when unset; set it where the gateway is reached on a non-standard port or through another name.
+          registry_size:
+            type: string
+            default: 10Gi
+            description: Size of the volume backing the in-cluster registry, where no object storage exists. Holds schematics and cached boot assets.
+          max_concurrency:
+            type: integer
+            minimum: 1
+            default: 6
+            description: Simultaneous asset builds. Each build is CPU-heavy; raise it with the node pool, not ahead of it.
+          min_talos_version:
+            type: string
+            default: "1.2.0"
+            description: Oldest Talos release the factory will generate assets for.
+          cache_signing_key:
+            type: string
+            sensitive: true
+            description: ECDSA private key used to sign cached boot assets so nodes can verify what the factory serves. Generate with `openssl ecparam -name prime256v1 -genkey -noout`. Set via a secret() reference.
+          registry:
+            type: object
+            properties:
+              schematic:
+                type: object
+                properties:
+                  registry:
+                    type: string
+                    description: OCI registry the factory writes generated schematics to. It needs push access; this is not a mirror.
+                  namespace:
+                    type: string
+                    default: siderolabs/image-factory
+                    description: Repository path prefix for schematics.
+                  repository:
+                    type: string
+                    default: schematics
+                    description: Repository name for schematics.
+                  insecure:
+                    type: boolean
+                    default: false
+                    description: Allow HTTP or invalid TLS to the schematic registry.
+                additionalProperties: false
+              installer:
+                type: object
+                properties:
+                  repository:
+                    type: string
+                    default: installer
+                    description: Repository name the factory pushes built installer images to, on the same registry as schematic.
+                additionalProperties: false
+            additionalProperties: false
+            description: Registries the factory reads from and writes to.
+        additionalProperties: false
+        description: Self-hosted Talos image factory
+
+      # Self-hosted Sidero Omni, the fleet's Talos control plane. See
+      # addon-provisioning.yaml for the deployment shape (embedded etcd, own TLS,
+      # SideroLink, Keycloak SAML).
+      omni:
+        type: object
+        properties:
+          hostname:
+            type: string
+            description: Base hostname Omni's UI/API advertises. Derived as omni.<domain> when unset; the Kubernetes proxy and SideroLink machine API endpoints are derived from this same base (kubernetes.<hostname>, siderolink.<hostname>).
+          account_id:
+            type: string
+            description: UUID for config.account.id. Must not change for the lifetime of the installation. Terraform-generated and held in state when unset.
+          wireguard:
+            type: object
+            properties:
+              service_type:
+                type: string
+                enum:
+                  - NodePort
+                  - LoadBalancer
+                description: Kubernetes Service type fronting SideroLink's WireGuard port. Defaults to NodePort on docker-desktop and LoadBalancer everywhere else.
+              advertised_endpoint:
+                type: string
+                description: host:port machines dial for SideroLink, overriding the derived hostname/NodePort. Changing this after machines have joined requires re-provisioning them.
+              node_port:
+                type: integer
+                description: NodePort for the WireGuard Service (chart default 30180). Override on a port conflict; also republishes as the docker-desktop hostport.
+            additionalProperties: false
+          persistence_size:
+            type: string
+            default: 16Gi
+            description: Size of the volume backing Omni's embedded etcd, secondary SQLite storage, and machine logs.
+          etcd_encryption_key:
+            type: string
+            sensitive: true
+            description: ASCII-armored GPG private key Omni uses to decrypt its etcd master key (config.storage.default.etcd.privateKeySource). Generate with `(export GNUPGHOME=$(mktemp -d); gpg --batch --passphrase '' --quick-gen-key x; gpg -a --export-secret-key > omni.asc; rm -rf $GNUPGHOME)`. Set via a secret() reference. Required outside dev mode; dev mode falls back to a fixed key checked into the facet.
+          initial_admins:
+            type: array
+            items:
+              type: string
+            description: Emails seeded as admins on Omni's first start (config.auth.initialUsers), before Keycloak SAML group membership grants any role. Bootstrap only, not how production access is granted. The chart refuses to start with none at all — required outside dev mode; dev mode seeds a fixed placeholder. Deliberately no default here — a schema default would be materialized ahead of the facet's own null-coalescing fallback, permanently masking the dev-mode default.
+          service_account_key:
+            type: string
+            sensitive: true
+            description: Base64-encoded Omni service account key for the omni_exporter Deployment (client.WithServiceAccount). Nothing in this repo can create it — Omni has no non-interactive bootstrap credential, only SAML/WebAuthn/Auth0 login, so an admin has to log in once and run `omnictl serviceaccount create --use-user-role=false --role=Reader omni-exporter`, then set this via a secret() reference. Unset leaves the exporter Deployment out entirely; nothing else in this facet depends on it.
+        additionalProperties: false
+        description: Self-hosted Sidero Omni fleet control plane
     additionalProperties: false
-    description: Self-hosted Sidero Omni fleet control plane
 
   # Sibling of Core's location, network_zone, token, and dns_parent_zone.
   hetzner:
