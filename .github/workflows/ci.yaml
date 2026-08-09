@@ -132,7 +132,7 @@ jobs:
   integration:
     name: Integration
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 55
     steps:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -182,7 +182,7 @@ jobs:
 
       - name: Windsor Up
         id: windsor_up
-        timeout-minutes: 25
+        timeout-minutes: 35
         run: windsor up --verbose --wait
 
       # windsor up --wait already blocks on each Kustomization's Ready condition, which Flux

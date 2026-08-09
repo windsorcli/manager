@@ -400,7 +400,7 @@ cases:
               omni_machine_api_hostname: omni-siderolink.cluster.local
               omni_persistence_size: 16Gi
               omni_image_factory_url: https://factory.talos.dev
-            timeout: 10m
+            timeout: 30m
             interval: 5m
           resources:
             - dependsOn:

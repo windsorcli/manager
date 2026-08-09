@@ -46,7 +46,8 @@ metadata:
 spec:
   backoffLimit: 10
   ttlSecondsAfterFinished: 86400
-  activeDeadlineSeconds: 900
+  # Must exceed Keycloak's cold-start-to-Ready under load, which the auth loop below waits out.
+  activeDeadlineSeconds: 1800
   template:
     spec:
       restartPolicy: Never
@@ -97,7 +98,7 @@ spec:
                   | jq -r '.access_token // empty') || true
                 if [ -n "$${token}" ]; then break; fi
                 i=$$((i + 1))
-                if [ "$${i}" -ge 60 ]; then
+                if [ "$${i}" -ge 300 ]; then
                   echo "timed out authenticating to the keycloak admin api" >&2
                   exit 1
                 fi

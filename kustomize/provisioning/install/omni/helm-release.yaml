@@ -6,7 +6,9 @@ metadata:
   namespace: provisioning
 spec:
   interval: 5m
-  timeout: 10m
+  # Omni's readiness depends on Keycloak's SAML descriptor being reachable and its client
+  # registered; a single patient install rides out Keycloak's cold start instead of remediating.
+  timeout: 25m
   targetNamespace: provisioning
   install:
     createNamespace: false
