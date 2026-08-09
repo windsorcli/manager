@@ -193,7 +193,10 @@ jobs:
       - name: Verify the omni SAML client registered
         run: |
           kubectl -n provisioning wait --for=condition=complete job/keycloak-omni-saml-client --timeout=5m
-          kubectl -n provisioning logs job/keycloak-omni-saml-client | grep -qE 'registered omni saml client|already registered'
+          # The Job retries pods while Keycloak cold-starts; read every pod's logs, since
+          # `logs job/...` picks one arbitrary attempt that may be a failed early one.
+          kubectl -n provisioning logs -l batch.kubernetes.io/job-name=keycloak-omni-saml-client --tail=-1 \
+            | grep -qE 'registered omni saml client|already registered'
 
       - name: Diagnostics on failure
         if: failure()
