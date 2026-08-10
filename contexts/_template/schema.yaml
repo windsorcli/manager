@@ -32,6 +32,27 @@ type: object
 
 properties:
 
+  # Object storage backing every in-cluster registry that needs bucket-backed storage —
+  # image_factory's cache and harbor's own image store, each in its own bucket (see
+  # config-object-store.yaml). Nested under minio, not a flat sibling of driver, because
+  # config-object-store.yaml computes its own driver/endpoint/region/prefix onto this
+  # same object_store key — a raw operator field of the same name would collide with
+  # that computed value. This is a separate tree from Core's own flat
+  # object_store.enabled/driver (its minio operator toggle); config-object-store.yaml
+  # reads that one to decide whether minio is available, but writes its own resolution
+  # here. More than one consumer reads this, so it stays a top-level key rather than
+  # nesting under either consumer.
+  object_store:
+    type: object
+    properties:
+      minio:
+        type: object
+        properties:
+          endpoint:
+            type: string
+            description: S3 endpoint of the MinIO Tenant serving buckets. Core's addon installs the operator but creates no Tenant, so on platforms with no managed object storage this has to be given explicitly.
+        additionalProperties: false
+
   # Downstream cluster provisioning: the image factory and Omni, grouped under one
   # namespace since both are part of the same provisioning pipeline. `enabled` is the
   # umbrella switch addon-provisioning.yaml's own config: block fans out from (turning
@@ -46,27 +67,6 @@ properties:
         type: boolean
         default: false
         description: Enable the self-hosted Omni management plane and the capabilities it depends on (identity, image factory).
-
-      # Object storage backing the image factory's in-cluster registry. Nested under
-      # minio, not a flat sibling of driver, because addon-provisioning.yaml computes
-      # its own driver/endpoint/region/prefix onto this same object_store key — a raw
-      # operator field of the same name would collide with that computed value. This is
-      # a separate tree from Core's own flat object_store.enabled/driver (its minio
-      # operator toggle); addon-provisioning.yaml reads that one to decide whether
-      # minio is available, but writes its own resolution here. image_factory is the
-      # only consumer, so this lives under provisioning rather than as its own
-      # top-level key.
-      object_store:
-        type: object
-        properties:
-          minio:
-            type: object
-            properties:
-              endpoint:
-                type: string
-                description: S3 endpoint of the MinIO Tenant serving buckets. Core's addon installs the operator but creates no Tenant, so on platforms with no managed object storage this has to be given explicitly.
-            additionalProperties: false
-        additionalProperties: false
 
       # Self-hosted Talos image/schematic generation.
       image_factory:
@@ -179,6 +179,43 @@ properties:
         additionalProperties: false
         description: Self-hosted Sidero Omni fleet control plane
     additionalProperties: false
+
+  # Fleet container registry. Capability-plus-driver, the same shape Core's own
+  # identity.driver/database.postgres.driver use — one driver today, room for another
+  # without a breaking schema change later. See ADR-0008 for why Harbor rather than a
+  # second bare distribution cache, and for the two-phase plan this schema only
+  # carries Phase 1 of: local admin auth, no OIDC/proxy-cache/GC config yet.
+  registry:
+    type: object
+    properties:
+      enabled:
+        type: boolean
+        default: false
+        description: Enable the fleet container registry.
+      driver:
+        type: string
+        enum:
+          - harbor
+        default: harbor
+        description: harbor hosts a full-featured self-hosted registry (scanning, RBAC, UI, replication).
+      harbor:
+        type: object
+        description: Hosted Harbor settings (driver harbor)
+        properties:
+          hostname:
+            type: string
+            description: Base hostname Harbor's UI/API advertises. Derived as harbor.<domain> when unset.
+          admin_password:
+            type: string
+            sensitive: true
+            description: Initial password for Harbor's local admin account (the only auth method in Phase 1 — see ADR-0008). Set via a secret() reference. Required outside dev mode; dev mode falls back to a fixed password checked into the facet.
+          registry_size:
+            type: string
+            default: 20Gi
+            description: Size of the volume backing the in-cluster registry, where no object storage exists. Holds pushed images and charts.
+        additionalProperties: false
+    additionalProperties: false
+    description: Self-hosted fleet container registry
 
   # Sibling of Core's location, network_zone, token, and dns_parent_zone.
   hetzner:

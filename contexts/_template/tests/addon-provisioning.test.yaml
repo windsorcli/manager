@@ -101,10 +101,9 @@ cases:
           enabled: true
       object_store:
         enabled: true
+        minio:
+          endpoint: https://minio.system-object-store.svc:9000
       provisioning:
-        object_store:
-          minio:
-            endpoint: https://minio.system-object-store.svc:9000
         image_factory:
           enabled: true
           registry:
@@ -206,10 +205,9 @@ cases:
       cluster: *default-cluster
       object_store:
         enabled: true
+        minio:
+          endpoint: https://minio.system-object-store.svc:9000
       provisioning:
-        object_store:
-          minio:
-            endpoint: https://minio.system-object-store.svc:9000
         image_factory:
           enabled: true
     expect:
@@ -273,7 +271,7 @@ cases:
           enabled: true
     expect:
       terraform:
-        - name: object-store
+        - name: image-factory-object-store
           path: object-store/aws
           inputs:
             buckets:

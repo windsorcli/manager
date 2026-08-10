@@ -12,24 +12,8 @@ metadata:
 when: provisioning.enabled == true || provisioning.image_factory.enabled == true
 
 requires:
-  - when: >-
-      provisioning.object_store.driver == 'hetzner' && provisioning.image_factory.enabled == true
-      && ((env("HETZNER_S3_ACCESS_KEY") ?? '') == '' || (env("HETZNER_S3_SECRET_KEY") ?? '') == '')
-    paths:
-      - hetzner.object_storage.access_key
-      - hetzner.object_storage.secret_key
-    message: >-
-      Hetzner issues S3 credentials from the console only, so they cannot be provisioned.
-      Export HETZNER_S3_ACCESS_KEY and HETZNER_S3_SECRET_KEY, or set both values here.
-
-  - when: provisioning.object_store.driver == 'minio' && provisioning.image_factory.enabled == true
-    paths:
-      - provisioning.object_store.minio.endpoint
-    message: >-
-      Core's object store addon installs the MinIO operator but creates no Tenant, so the
-      S3 endpoint of the Tenant serving these buckets has to be given explicitly.
-
-  # Omni only — image_factory has no requirements of its own.
+  # Omni only — image_factory has no requirements of its own beyond
+  # config-object-store.yaml's shared object_store checks.
   - when: provisioning.enabled == true && identity.enabled != false
     paths:
       - gateway.enabled
@@ -64,67 +48,28 @@ terraform:
     path: ids/omni-account
     when: provisioning.enabled == true && identity.enabled != false && (provisioning.omni.account_id ?? '') == ''
 
-  - name: object-store
+  - name: image-factory-object-store
     path: object-store/hetzner
-    when: provisioning.object_store.driver == 'hetzner' && provisioning.image_factory.enabled == true
+    when: object_store.driver == 'hetzner' && provisioning.image_factory.enabled == true
     inputs:
       access_key: ${hetzner.object_storage.access_key ?? env("HETZNER_S3_ACCESS_KEY")}
       secret_key: ${hetzner.object_storage.secret_key ?? env("HETZNER_S3_SECRET_KEY")}
       location: "${hetzner.object_storage.location ?? 'fsn1'}"
+      # Rebuildable cache — force_destroy stays on. Harbor's own bucket
+      # (addon-harbor.yaml) is a separate stack invocation with its own setting; see
+      # ADR-0008 decision 4 for why the two don't share a bucket or a destroy policy.
       buckets:
-        - "${provisioning.object_store.prefix}-image-factory"
+        - "${object_store.prefix}-image-factory"
 
-  - name: object-store
+  - name: image-factory-object-store
     path: object-store/aws
-    when: provisioning.object_store.driver == 'aws' && provisioning.image_factory.enabled == true
+    when: object_store.driver == 'aws' && provisioning.image_factory.enabled == true
     inputs:
       region: ${aws.region}
       buckets:
-        - "${provisioning.object_store.prefix}-image-factory"
+        - "${object_store.prefix}-image-factory"
 
 config:
-  # Object storage backing the image factory's in-cluster registry. driver: hetzner
-  # and aws provision buckets in the platform's own object storage; minio uses Core's
-  # in-cluster operator, which installs no Tenant, so its endpoint stays an operator
-  # input; none means no bucket-backed storage is available.
-  - name: provisioning
-    value:
-      object_store:
-        driver: none
-        endpoint: ""
-        region: ""
-        prefix: "windsor-${id}"
-
-  - name: provisioning
-    when: platform == 'hetzner'
-    value:
-      object_store:
-        driver: hetzner
-        # Object Storage runs in fsn1, nbg1, and hel1 only, so its location is set
-        # independently of where the servers run.
-        endpoint: "https://${hetzner.object_storage.location ?? 'fsn1'}.your-objectstorage.com"
-        region: "${hetzner.object_storage.location ?? 'fsn1'}"
-
-  - name: provisioning
-    when: platform == 'aws'
-    value:
-      object_store:
-        driver: aws
-        endpoint: "https://s3.${aws.region}.amazonaws.com"
-        region: "${aws.region}"
-
-  # object_store.enabled/driver here are Core's own raw operator toggle (object_store
-  # is a flat top-level key there — see ../core's schema), not
-  # provisioning.object_store: Core's minio operator installs no Tenant, so an
-  # endpoint still has to come from provisioning.object_store.minio.endpoint below.
-  - name: provisioning
-    when: platform != 'hetzner' && platform != 'aws' && (object_store.enabled ?? false) == true
-    value:
-      object_store:
-        driver: minio
-        endpoint: "${provisioning.object_store.minio.endpoint ?? ''}"
-        region: ""
-
   # provisioning.enabled == true fans on the capabilities Omni depends on: Core's
   # identity (Keycloak, and through it the database the server needs) and the image
   # factory Omni provisions Talos machines from. Both schema-default to enabled: false,
@@ -265,19 +210,19 @@ flux:
       components:
         - image-factory
         - "${(provisioning.image_factory.registry.schematic.registry ?? '') == '' ? 'registry' : ''}"
-        - "${(provisioning.image_factory.registry.schematic.registry ?? '') == '' && (provisioning.object_store.driver == 'hetzner' || provisioning.object_store.driver == 'aws') ? 'registry/s3' : ''}"
-        - "${(provisioning.image_factory.registry.schematic.registry ?? '') == '' && provisioning.object_store.driver != 'hetzner' && provisioning.object_store.driver != 'aws' ? 'registry/pvc' : ''}"
+        - "${(provisioning.image_factory.registry.schematic.registry ?? '') == '' && (object_store.driver == 'hetzner' || object_store.driver == 'aws') ? 'registry/s3' : ''}"
+        - "${(provisioning.image_factory.registry.schematic.registry ?? '') == '' && object_store.driver != 'hetzner' && object_store.driver != 'aws' ? 'registry/pvc' : ''}"
         - "${topology == 'ha' ? 'image-factory/ha' : ''}"
         - "${(telemetry.metrics.enabled ?? false) == true ? 'image-factory/prometheus' : ''}"
       substitutions:
         # The same expression the terraform block above hands the bucket module, so
         # the registry and the bucket that gets provisioned cannot drift apart.
-        registry_bucket: "${provisioning.object_store.prefix}-image-factory"
-        registry_region: "${provisioning.object_store.region ?? ''}"
-        registry_endpoint: "${provisioning.object_store.endpoint ?? ''}"
+        registry_bucket: "${object_store.prefix}-image-factory"
+        registry_region: "${object_store.region ?? ''}"
+        registry_endpoint: "${object_store.endpoint ?? ''}"
         registry_storage_class: "${cluster.storage.class ?? 'single'}"
         registry_storage_size: "${provisioning.image_factory.registry_size ?? '10Gi'}"
-        registry_replicas: "${topology == 'ha' && (provisioning.object_store.driver == 'hetzner' || provisioning.object_store.driver == 'aws') ? 2 : 1}"
+        registry_replicas: "${topology == 'ha' && (object_store.driver == 'hetzner' || object_store.driver == 'aws') ? 2 : 1}"
         external_domain: "${(dns.public_domain ?? '') == '' ? (dns.private_domain ?? dns.domain ?? '') : dns.public_domain}"
         # Explicit override wins; else derive from the domain the route publishes on.
         # docker-desktop reaches the gateway on 8443 rather than 443.
