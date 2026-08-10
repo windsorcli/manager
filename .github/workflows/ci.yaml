@@ -126,9 +126,10 @@ jobs:
   # ===========================================================================
   # Integration
   # ===========================================================================
-  # Brings the composed blueprint up on a local Talos cluster in Docker, with the image
-  # factory enabled, then tears it down. Manager layers on core:latest, so this is also
-  # the only check that the published Core artifact and these facets still compose.
+  # Brings the composed blueprint up on a local Talos cluster in Docker, with provisioning
+  # (image factory + omni) and the Harbor registry enabled, then tears it down. Manager
+  # layers on core:latest, so this is also the only check that the published Core artifact
+  # and these facets still compose.
   integration:
     name: Integration
     runs-on: ubuntu-latest
@@ -166,16 +167,17 @@ jobs:
           restore-keys: |
             docker-cache-${{ runner.os }}-
 
-      # Provisioning is off by default, so without --set this would bring up a bare Core
-      # cluster and assert nothing about what this repo adds. provisioning.enabled fans on
-      # identity (Keycloak), image-factory, and omni together — see addon-provisioning.yaml's
-      # `config:` and `when:` blocks. dns.domain matches what the add-ons' routes publish
-      # under.
+      # Provisioning and the registry are off by default, so without --set this would bring
+      # up a bare Core cluster and assert nothing about what this repo adds. provisioning.enabled
+      # fans on identity (Keycloak), image-factory, and omni together; registry.enabled fans on
+      # the Harbor stack and its CNPG database — see addon-provisioning.yaml and addon-registry.yaml
+      # `config:`/`when:` blocks. dns.domain matches what the add-ons' routes publish under.
       - name: Windsor Init
         run: |
           windsor init local --reset \
             --set dns.domain=test \
-            --set provisioning.enabled=true
+            --set provisioning.enabled=true \
+            --set registry.enabled=true
 
       - name: Show blueprint
         run: windsor show blueprint
@@ -198,6 +200,25 @@ jobs:
           kubectl -n provisioning logs -l batch.kubernetes.io/job-name=keycloak-omni-saml-client --tail=-1 \
             | grep -qE 'registered omni saml client|already registered'
 
+      # windsor up --wait proves the Harbor pods rolled out; what it can't prove is that the
+      # gateway accepted the route and resolved its backend, which is what makes harbor.<domain>
+      # actually reachable. Assert both parent conditions across the HTTPRoute (driver-agnostic;
+      # an external curl would depend on runner->LoadBalancer routing this doesn't guarantee).
+      - name: Verify Harbor is reachable through the gateway
+        run: |
+          for _ in $(seq 30); do
+            conds=$(kubectl -n registry get httproute harbor \
+              -o jsonpath='{.status.parents[*].conditions[?(@.type=="Accepted")].status} {.status.parents[*].conditions[?(@.type=="ResolvedRefs")].status}' 2>/dev/null || true)
+            case "$conds" in
+              *False*|*Unknown*|" "|"") sleep 5 ;;
+              *True*) echo "harbor route programmed: $conds"; exit 0 ;;
+              *) sleep 5 ;;
+            esac
+          done
+          echo "harbor HTTPRoute not programmed by the gateway (Accepted/ResolvedRefs): '$conds'" >&2
+          kubectl -n registry get httproute harbor -o yaml >&2 || true
+          exit 1
+
       - name: Diagnostics on failure
         if: failure()
         run: |
@@ -210,6 +231,10 @@ jobs:
           kubectl -n system-identity get events --sort-by=.lastTimestamp || true
           kubectl -n system-identity describe pods || true
           kubectl -n provisioning logs job/keycloak-omni-saml-client --tail=200 || true
+          kubectl -n registry get events --sort-by=.lastTimestamp || true
+          kubectl -n registry describe pods || true
+          kubectl -n registry get httproute harbor -o yaml || true
+          kubectl -n registry logs -l app.kubernetes.io/name=harbor --tail=200 || true
           flux get all -A || true
 
       - name: Windsor Down
