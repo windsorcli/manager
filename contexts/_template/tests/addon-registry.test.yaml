@@ -161,6 +161,25 @@ cases:
               harbor_registry_region: fsn1
               harbor_registry_endpoint: https://fsn1.your-objectstorage.com
 
+  # Harbor as the only S3 consumer on hetzner without credentials: the shared
+  # object-store requires: guard must fire even when image-factory is off.
+  - name: fails without hetzner credentials when harbor is the only s3 consumer
+    values:
+      id: tst1
+      platform: hetzner
+      hetzner:
+        token: dummy-token
+        location: fsn1
+        network_zone: eu-central
+      network: *default-network
+      cluster: *default-cluster
+      gateway: *default-gateway
+      registry:
+        enabled: true
+        harbor:
+          admin_password: supplied-by-operator
+    expectError: true
+
   # Same shape as the hetzner case above, on the platform where object storage needs
   # no addon to reach s3.
   - name: derives the bucket, region, and endpoint from the platform on aws
