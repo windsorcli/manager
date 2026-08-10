@@ -249,16 +249,12 @@ jobs:
     name: Resolve Threads
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    # resolveReviewThread needs contents: write on top of pull-requests: write.
-    # With the workflow-level contents: read the mutation returns "Resource not
-    # accessible by integration" and the thread stays open. A job-level block replaces
-    # the workflow-level one outright rather than merging, so id-token: write has to be
-    # repeated here — claude-code-action fetches an OIDC token and fails without it.
+    # resolveReviewThread needs contents: write on top of pull-requests: write; with
+    # only contents: read the mutation returns "Resource not accessible by integration"
+    # and the thread stays open.
     permissions:
       contents: write
       pull-requests: write
-      issues: write
-      id-token: write
     if: >-
       github.event_name == 'pull_request' &&
       github.event.action == 'synchronize' &&
@@ -266,8 +262,12 @@ jobs:
       !contains(github.event.pull_request.labels.*.name, 'dependencies') &&
       !github.event.pull_request.draft
     steps:
-      - name: Check for unresolved bot threads
-        id: check
+      # A bot review thread is auto-resolved once GitHub marks it outdated (the commented
+      # lines changed on this push) and no human has replied. "Outdated" is the signal
+      # available without judging whether the concern itself was addressed, so non-outdated
+      # threads are left for a human. Done in plain bash rather than a model in a permission
+      # sandbox: the task is mechanical and the sandbox blocked the queries it needed to run.
+      - name: Resolve addressed bot threads
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
@@ -275,89 +275,35 @@ jobs:
         run: |
           OWNER="${GH_REPO%/*}"
           REPO="${GH_REPO#*/}"
-          COUNT=$(gh api graphql -f query='
+          mapfile -t IDS < <(gh api graphql -f query='
             query($owner:String!,$repo:String!,$num:Int!){
               repository(owner:$owner,name:$repo){
                 pullRequest(number:$num){
                   reviewThreads(first:100){
                     nodes{
-                      isResolved
-                      comments(first:1){ nodes{ author{ login } } }
+                      id isResolved isOutdated
+                      comments(first:50){ nodes{ author{ login } } }
                     }
                   }
                 }
               }
             }' -F owner="$OWNER" -F repo="$REPO" -F num="$PR_NUMBER" \
-            --jq '[.data.repository.pullRequest.reviewThreads.nodes[]
-                   | select(.isResolved == false)
-                   | select(.comments.nodes[0].author.login
-                       | test("\\[bot\\]$|^github-actions|^claude$"))]
-                   | length')
-          echo "count=$COUNT" >> "$GITHUB_OUTPUT"
-          echo "Unresolved bot threads: $COUNT"
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        if: steps.check.outputs.count != '0'
-        with:
-          fetch-depth: 1
-      - uses: anthropics/claude-code-action@6b082c41935b4c8a3b8b0ef85ba4ba4d9eeb8975 # v1.0.189
-        if: steps.check.outputs.count != '0'
-        env:
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          GH_REPO: ${{ github.repository }}
-        with:
-          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          show_full_output: true
-          prompt: |
-            Your only job is to identify which existing review threads on
-            this PR have been addressed. Do NOT call any GitHub write API
-            yourself — a later CI step resolves the threads you identify.
-            Do NOT post new findings or update the PR summary.
+            --jq '.data.repository.pullRequest.reviewThreads.nodes[]
+                  | select(.isResolved == false and .isOutdated == true)
+                  | select([.comments.nodes[].author.login]
+                      | all(test("\\[bot\\]$|^github-actions|^claude$")))
+                  | .id')
 
-            1. List unresolved review threads:
-
-              gh api graphql -f query='
-                query($owner:String!,$repo:String!,$num:Int!){
-                  repository(owner:$owner,name:$repo){
-                    pullRequest(number:$num){
-                      reviewThreads(first:100){
-                        nodes{
-                          id isResolved isOutdated
-                          comments(first:1){ nodes{ author{login} path line body } }
-                        }
-                      }
-                    }
-                  }
-                }' -F owner="${GH_REPO%/*}" -F repo="${GH_REPO#*/}" -F num="$PR_NUMBER"
-
-            2. For each unresolved thread authored by the bot (login ending
-               in `[bot]`, `github-actions`, or `claude`):
-               - If `isOutdated: true`, it qualifies.
-               - Otherwise, read the file at the commented path/line and
-                 check whether the specific concern is still present. If
-                 fixed, it qualifies.
-               - If a human has replied to the thread, leave it alone — it
-                 does not qualify.
-
-            3. Write the id of every qualifying thread, one per line, to
-               /tmp/resolve-thread-ids.txt. Write an empty file if none
-               qualify.
-
-            That is all. Do not run any `gh api graphql` mutation. Do not
-            post comments. Do not modify the PR description. Be fast.
-          claude_args: |
-            --model claude-sonnet-4-6
-            --max-turns 15
-            --allowedTools "Read,Grep,Glob,Bash(git diff:*),Bash(git log:*),Bash(gh api:*),Bash(cat:*),Bash(jq:*),Write"
-            --disallowedTools WebSearch,WebFetch
-      - name: Resolve identified threads
-        if: always() && steps.check.outputs.count != '0'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GH_REPO: ${{ github.repository }}
-        run: |
-          # Same reasoning as "Publish review": always run main's copy so a
-          # PR branch opened or last pushed before this script was added
-          # still gets it.
-          git fetch --depth=1 origin main
-          git show origin/main:.github/scripts/resolve-threads.sh > /tmp/resolve-threads.sh
-          bash /tmp/resolve-threads.sh
+          if [ "${#IDS[@]}" -eq 0 ]; then
+            echo "No addressed bot threads to resolve."
+            exit 0
+          fi
+          for id in "${IDS[@]}"; do
+            if gh api graphql -f query='
+              mutation($id:ID!){ resolveReviewThread(input:{threadId:$id}){ thread{ isResolved } } }' \
+              -f id="$id" > /dev/null; then
+              echo "Resolved thread $id"
+            else
+              echo "::warning::Failed to resolve thread $id"
+            fi
+          done
