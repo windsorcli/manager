@@ -21,7 +21,7 @@ spec:
     spec:
       chart: omni
       # renovate: datasource=docker depName=omni-chart package=ghcr.io/siderolabs/charts/omni
-      version: 2.10.0
+      version: 2.10.3
       sourceRef:
         kind: HelmRepository
         name: siderolabs
