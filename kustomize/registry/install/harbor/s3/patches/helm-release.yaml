@@ -1,0 +1,13 @@
+# S3-backed registry storage. Replaces the filesystem default with a bucket from the
+# platform's object store — credentials come from the harbor-registry-s3 Secret the
+# facet materializes, with the exact key names this chart's s3.existingSecret expects
+# (REGISTRY_STORAGE_S3_ACCESSKEY / _SECRETKEY).
+- op: replace
+  path: /spec/values/persistence/imageChartStorage
+  value:
+    type: s3
+    s3:
+      region: ${harbor_registry_region}
+      bucket: ${harbor_registry_bucket}
+      regionendpoint: ${harbor_registry_endpoint}
+      existingSecret: harbor-registry-s3

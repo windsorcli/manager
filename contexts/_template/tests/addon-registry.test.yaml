@@ -1,0 +1,273 @@
+# addon-registry.yaml facet tests
+# Covers the enabled/disabled gate, the required admin password and gateway, the
+# database fan-on, storage landing on a PVC vs an object-store bucket, and the
+# terraform bucket provisioning on hetzner/aws — see ADR-0008 for the Phase 1 scope
+# this facet implements (local admin auth, no OIDC/proxy-cache/GC yet).
+
+x-defaults:
+  network: &default-network
+    cidr_block: 10.5.0.0/16
+    loadbalancer_driver: kube-vip
+    loadbalancer_mode: arp
+    loadbalancer_ips:
+      start: "10.5.1.10"
+      end: "10.5.1.100"
+
+  cluster: &default-cluster
+    driver: talos
+    controlplanes:
+      nodes:
+        controlplane-1:
+          endpoint: 10.5.0.10:50000
+          node: 10.5.0.10
+          hostname: controlplane-1
+    workers:
+      volumes:
+        - /var/mnt/local
+
+  gateway: &default-gateway
+    enabled: true
+    driver: envoy
+
+cases:
+  # Baseline: dev mode supplies the admin password fallback, no object store resolves
+  # so storage lands on a PVC.
+  - name: installs harbor with a pvc-backed registry in dev mode
+    values:
+      dev: true
+      platform: metal
+      network: *default-network
+      cluster: *default-cluster
+      gateway: *default-gateway
+      registry:
+        enabled: true
+    expect:
+      flux:
+        - name: registry
+          dependsOn:
+            - pki-install
+            - database-install
+            - gateway-install
+          install:
+            components:
+              - database
+              - harbor
+            substitutions:
+              harbor_hostname: harbor.test
+              harbor_storage_class: single
+              harbor_registry_size: 20Gi
+            timeout: 15m
+            interval: 5m
+          resources:
+            - dependsOn:
+                - gateway-resources
+              components:
+                - harbor/gateway
+      config:
+        database:
+          postgres:
+            enabled: true
+
+  # driver defaults to harbor, so leaving it unset still resolves.
+  - name: defaults the driver to harbor
+    values:
+      dev: true
+      platform: metal
+      network: *default-network
+      cluster: *default-cluster
+      gateway: *default-gateway
+      registry:
+        enabled: true
+    expect:
+      flux:
+        - name: registry
+
+  # Operator-supplied admin password flows through as the secret's value.
+  - name: honors an explicit admin password
+    values:
+      platform: metal
+      network: *default-network
+      cluster: *default-cluster
+      gateway: *default-gateway
+      registry:
+        enabled: true
+        harbor:
+          admin_password: supplied-by-operator
+    expect:
+      flux:
+        - name: registry
+          install:
+            components:
+              - database
+              - harbor
+
+  # Explicit hostname override flows through the install-tier substitution.
+  - name: honors an explicit hostname
+    values:
+      platform: metal
+      network: *default-network
+      cluster: *default-cluster
+      gateway: *default-gateway
+      registry:
+        enabled: true
+        harbor:
+          admin_password: supplied-by-operator
+          hostname: registry.fleet.example.com
+    expect:
+      flux:
+        - name: registry
+          install:
+            substitutions:
+              harbor_hostname: registry.fleet.example.com
+
+  # A platform with its own object storage needs no addon to reach s3, and the
+  # bucket name has to match the one the terraform block provisions.
+  - name: derives the bucket, region, and endpoint from the platform on hetzner
+    env:
+      HETZNER_S3_ACCESS_KEY: test-access
+      HETZNER_S3_SECRET_KEY: test-secret
+    values:
+      id: tst1
+      platform: hetzner
+      hetzner:
+        token: dummy-token
+        location: fsn1
+        network_zone: eu-central
+      network: *default-network
+      cluster: *default-cluster
+      gateway: *default-gateway
+      registry:
+        enabled: true
+        harbor:
+          admin_password: supplied-by-operator
+    expect:
+      terraform:
+        - name: harbor-object-store
+          path: object-store/hetzner
+          inputs:
+            location: fsn1
+            force_destroy: "false"
+            buckets:
+              - windsor-tst1-harbor
+      flux:
+        - name: registry
+          install:
+            components:
+              - database
+              - harbor
+              - harbor/s3
+            substitutions:
+              harbor_registry_bucket: windsor-tst1-harbor
+              harbor_registry_region: fsn1
+              harbor_registry_endpoint: https://fsn1.your-objectstorage.com
+
+  # Harbor as the only S3 consumer on hetzner without credentials: the shared
+  # object-store requires: guard must fire even when image-factory is off.
+  - name: fails without hetzner credentials when harbor is the only s3 consumer
+    values:
+      id: tst1
+      platform: hetzner
+      hetzner:
+        token: dummy-token
+        location: fsn1
+        network_zone: eu-central
+      network: *default-network
+      cluster: *default-cluster
+      gateway: *default-gateway
+      registry:
+        enabled: true
+        harbor:
+          admin_password: supplied-by-operator
+    expectError: true
+
+  # Same shape as the hetzner case above, on the platform where object storage needs
+  # no addon to reach s3.
+  - name: derives the bucket, region, and endpoint from the platform on aws
+    values:
+      id: tst1
+      platform: aws
+      network: *default-network
+      cluster: *default-cluster
+      aws:
+        region: us-west-2
+      gateway: *default-gateway
+      registry:
+        enabled: true
+        harbor:
+          admin_password: supplied-by-operator
+    expect:
+      terraform:
+        - name: harbor-object-store
+          path: object-store/aws
+          inputs:
+            force_destroy: "false"
+            buckets:
+              - windsor-tst1-harbor
+      flux:
+        - name: registry
+          install:
+            components:
+              - database
+              - harbor
+              - harbor/s3
+            substitutions:
+              harbor_registry_bucket: windsor-tst1-harbor
+              harbor_registry_region: us-west-2
+              harbor_registry_endpoint: https://s3.us-west-2.amazonaws.com
+
+  # Unlike identity (which can run driver: oidc with no local Postgres at all),
+  # Harbor has no driver that skips its database — an explicit opt-out here is a
+  # genuinely self-contradicting configuration (enable Harbor, forbid the database
+  # it unconditionally needs), so it fails composition rather than silently
+  # surviving the way identity's own database opt-out test does.
+  - name: fails when the database is explicitly disabled
+    values:
+      platform: metal
+      network: *default-network
+      cluster: *default-cluster
+      gateway: *default-gateway
+      registry:
+        enabled: true
+        harbor:
+          admin_password: supplied-by-operator
+      database:
+        postgres:
+          enabled: false
+    expectError: true
+
+  # Missing the admin password fails composition outside dev mode.
+  - name: fails without an admin password
+    values:
+      platform: metal
+      network: *default-network
+      cluster: *default-cluster
+      gateway: *default-gateway
+      registry:
+        enabled: true
+    expectError: true
+
+  # Harbor's UI/API need the shared gateway.
+  - name: fails without the gateway enabled
+    values:
+      platform: metal
+      network: *default-network
+      cluster: *default-cluster
+      gateway:
+        enabled: false
+      registry:
+        enabled: true
+        harbor:
+          admin_password: supplied-by-operator
+    expectError: true
+
+  # Off by default.
+  - name: excludes harbor when the addon is disabled
+    values:
+      platform: metal
+      network: *default-network
+      cluster: *default-cluster
+      gateway: *default-gateway
+      registry:
+        enabled: false
+    expect:
+      flux: []

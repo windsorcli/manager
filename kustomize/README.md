@@ -15,4 +15,5 @@ Reference index for the Kustomize add-ons in this blueprint. See
 | Path | Purpose |
 |---|---|
 | [provisioning](provisioning/) | Downstream cluster provisioning — self-hosted Talos image factory and Sidero Omni, turned on together by provisioning.enabled. |
+| [registry](registry/) | Self-hosted fleet container registry (Harbor) — Phase 1 of ADR-0008, reachable and locally authenticated. |
 <!-- END_INDEX -->

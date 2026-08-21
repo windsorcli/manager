@@ -1,0 +1,52 @@
+# Descriptor consumed by scripts/kustomize-docs.sh to populate the
+# BEGIN_KUSTOMIZE_DOCS / END_KUSTOMIZE_DOCS region of README.md.
+# Edit this file (not the README tables) when substitutions, components,
+# or dependencies change.
+
+substitutions:
+  harbor_hostname:
+    required_when: "always"
+    description: "Base hostname Harbor's UI/API advertises, from `registry.harbor.hostname` or derived as `harbor.<domain>`. Includes the docker-desktop `:8443` port suffix where the chart's own `externalURL` needs it."
+  harbor_storage_class:
+    required_when: "always"
+    description: "Storage class for the registry PVC when no object store backs it. Defaults to `cluster.storage.class`, or `single`."
+  harbor_registry_size:
+    required_when: "always"
+    description: "Size of the registry PVC when no object store backs it. Defaults to `20Gi`."
+  harbor_registry_bucket:
+    required_when: "`harbor/s3`"
+    description: "Bucket backing the registry. Built from `object_store.prefix`, the same expression the object-store Terraform module provisions."
+  harbor_registry_region:
+    required_when: "`harbor/s3`"
+    description: "Region embedded in the S3 v4 signature, from `object_store.region`."
+  harbor_registry_endpoint:
+    required_when: "`harbor/s3`"
+    description: "S3 endpoint the registry writes to, from `object_store.endpoint`."
+  external_domain:
+    required_when: "always"
+    description: "Domain the gateway route publishes under; the hostname is `harbor.<external_domain>`. Public domain when set, otherwise the private domain or the cluster domain."
+
+components:
+  database:
+    enable_when: "always"
+    description: "Dedicated CloudNativePG `Cluster` (`harbor-db`) — Harbor's Postgres, not the chart's bundled one. See ADR-0008 decision 2."
+  harbor:
+    enable_when: "always"
+    description: "Helm release of the official `goharbor/harbor-helm` chart in `harbor`. Local admin auth only in Phase 1 — see ADR-0008."
+  harbor/s3:
+    enable_when: "`object_store.driver` is `hetzner` or `aws`"
+    description: "Backs the registry with a bucket from the platform's object store instead of a PVC. Own bucket, own destroy policy — not shared with image-factory's. See ADR-0008 decision 4."
+  harbor/gateway:
+    enable_when: "always"
+    description: "HTTPRoute on Core's canonical `external` Gateway. Lives in the resources tier and depends on `gateway-resources`."
+
+dependencies:
+  pki:
+    required_when: "always"
+    reason: "Harbor is served over TLS, and the certificate is issued by the cluster issuer cert-manager installs."
+  gateway:
+    required_when: "always"
+    reason: "The route CRDs have to exist before the chart renders an HTTPRoute."
+  database:
+    required_when: "always"
+    reason: "The CloudNativePG operator has to exist before this facet's own `harbor-db` Cluster can reconcile."

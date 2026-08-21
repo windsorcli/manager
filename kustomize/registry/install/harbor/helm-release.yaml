@@ -1,0 +1,129 @@
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: harbor
+  namespace: registry
+spec:
+  interval: 5m
+  timeout: 15m
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    remediation:
+      retries: 3
+  chart:
+    spec:
+      chart: harbor
+      # renovate: datasource=helm depName=harbor package=harbor helmRepo=https://helm.goharbor.io
+      version: 1.19.2
+      sourceRef:
+        kind: HelmRepository
+        name: harbor
+  values:
+    externalURL: https://${harbor_hostname}
+    # Phase 1 (ADR-0008): local admin only. existingSecretAdminPasswordKey matches the
+    # chart's own default data key so the facet's secrets: block needs no extra mapping.
+    existingSecretAdminPassword: harbor-admin-password
+    existingSecretAdminPasswordKey: HARBOR_ADMIN_PASSWORD
+
+    # TLS terminates at the shared gateway, the same posture every other addon here
+    # uses (keycloak, image-factory, omni) — Harbor serves plain HTTP internally.
+    expose:
+      type: clusterIP
+      tls:
+        enabled: false
+
+    # Dedicated CNPG Cluster (install/database/database.yaml), not the chart's bundled
+    # Postgres — see ADR-0008 decision 2. sslmode stays disable: unlike Keycloak's CR,
+    # this chart has no CA-bundle field to trust CNPG's own cluster CA with.
+    database:
+      type: external
+      external:
+        host: harbor-db-rw
+        port: "5432"
+        username: harbor
+        coreDatabase: harbor
+        existingSecret: harbor-db-app
+        sslmode: disable
+
+    # Bundled Redis (ADR-0008 decision 3) — cache/session/job-queue only, nothing that
+    # needs to survive a restart the way the database or registry blobs do.
+    redis:
+      type: internal
+      internal:
+        resources:
+          requests:
+            cpu: 50m
+            memory: 128Mi
+          limits:
+            memory: 256Mi
+
+    # Storage backend. Defaults to the PVC fallback here; the s3/ component (selected
+    # when object_store resolves to hetzner or aws) patches this to the S3 driver
+    # instead — same object_store-driven branching image-factory's own registry uses.
+    persistence:
+      enabled: true
+      resourcePolicy: keep
+      persistentVolumeClaim:
+        registry:
+          storageClass: "${harbor_storage_class:-single}"
+          size: "${harbor_registry_size:-20Gi}"
+      imageChartStorage:
+        type: filesystem
+        filesystem:
+          rootdirectory: /storage
+
+    portal:
+      resources:
+        requests:
+          cpu: 50m
+          memory: 64Mi
+        limits:
+          memory: 128Mi
+
+    core:
+      resources:
+        requests:
+          cpu: 200m
+          memory: 256Mi
+        limits:
+          memory: 512Mi
+
+    jobservice:
+      resources:
+        requests:
+          cpu: 100m
+          memory: 256Mi
+        limits:
+          memory: 512Mi
+
+    registry:
+      registry:
+        resources:
+          requests:
+            cpu: 100m
+            memory: 256Mi
+          limits:
+            memory: 512Mi
+      controller:
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+          limits:
+            memory: 128Mi
+
+    # Scans run on push/schedule, not continuously — bursty, not steady-state, the
+    # same reasoning applied to image_factory's own resources. The chart's own
+    # default sets a CPU limit; this repo never does (see MEMORY.md), so it's
+    # explicitly nulled rather than left to inherit.
+    trivy:
+      resources:
+        requests:
+          cpu: 200m
+          memory: 512Mi
+        limits:
+          cpu: null
+          memory: 1Gi
