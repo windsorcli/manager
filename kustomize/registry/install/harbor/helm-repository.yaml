@@ -1,0 +1,10 @@
+---
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: harbor
+  namespace: registry
+spec:
+  interval: 10m
+  timeout: 3m
+  url: https://helm.goharbor.io

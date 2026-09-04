@@ -126,13 +126,29 @@ jobs:
   # ===========================================================================
   # Integration
   # ===========================================================================
-  # Brings the composed blueprint up on a local Talos cluster in Docker, with the image
-  # factory enabled, then tears it down. Manager layers on core:latest, so this is also
-  # the only check that the published Core artifact and these facets still compose.
+  # Brings the composed blueprint up on a local Talos cluster in Docker and tears it down.
+  # Manager layers on core:latest, so this is also the only check that the published Core
+  # artifact and these facets still compose. Split across a matrix so each heavy stack gets
+  # its own runner: `provisioning` (image factory + omni + Keycloak) and `registry` (Harbor
+  # plus its CNPG database) never contend for one machine.
   integration:
-    name: Integration
+    name: Integration (${{ matrix.scenario.name }})
     runs-on: ubuntu-latest
-    timeout-minutes: 55
+    timeout-minutes: ${{ matrix.scenario.job_timeout }}
+    strategy:
+      fail-fast: false
+      matrix:
+        scenario:
+          # up_timeout carries Keycloak's cold-start (see addon-provisioning); registry is
+          # lighter but Harbor's chart and CNPG still need room.
+          - name: provisioning
+            sets: --set provisioning.enabled=true
+            up_timeout: 35
+            job_timeout: 55
+          - name: registry
+            sets: --set registry.enabled=true
+            up_timeout: 25
+            job_timeout: 40
     steps:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -162,27 +178,26 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: .windsor/cache/docker
-          key: docker-cache-${{ runner.os }}-${{ github.sha }}
+          key: docker-cache-${{ runner.os }}-${{ matrix.scenario.name }}-${{ github.sha }}
           restore-keys: |
-            docker-cache-${{ runner.os }}-
+            docker-cache-${{ runner.os }}-${{ matrix.scenario.name }}-
 
-      # Provisioning is off by default, so without --set this would bring up a bare Core
-      # cluster and assert nothing about what this repo adds. provisioning.enabled fans on
-      # identity (Keycloak), image-factory, and omni together — see addon-provisioning.yaml's
-      # `config:` and `when:` blocks. dns.domain matches what the add-ons' routes publish
-      # under.
+      # Both capabilities are off by default, so without --set this would bring up a bare
+      # Core cluster and assert nothing about what this repo adds. dns.domain matches what the
+      # add-ons' routes publish under; see addon-provisioning.yaml / addon-registry.yaml for
+      # what each scenario's --set fans on.
       - name: Windsor Init
         run: |
           windsor init local --reset \
             --set dns.domain=test \
-            --set provisioning.enabled=true
+            ${{ matrix.scenario.sets }}
 
       - name: Show blueprint
         run: windsor show blueprint
 
       - name: Windsor Up
         id: windsor_up
-        timeout-minutes: 35
+        timeout-minutes: ${{ matrix.scenario.up_timeout }}
         run: windsor up --verbose --wait
 
       # windsor up --wait already blocks on each Kustomization's Ready condition, which Flux
@@ -191,12 +206,33 @@ jobs:
       # getting past --wait already proved. What --wait can't prove is that the saml-client
       # Job did the right thing rather than merely exiting 0, so check that explicitly.
       - name: Verify the omni SAML client registered
+        if: success() && matrix.scenario.name == 'provisioning'
         run: |
           kubectl -n provisioning wait --for=condition=complete job/keycloak-omni-saml-client --timeout=5m
           # The Job retries pods while Keycloak cold-starts; read every pod's logs, since
           # `logs job/...` picks one arbitrary attempt that may be a failed early one.
           kubectl -n provisioning logs -l batch.kubernetes.io/job-name=keycloak-omni-saml-client --tail=-1 \
             | grep -qE 'registered omni saml client|already registered'
+
+      # windsor up --wait proves the Harbor pods rolled out; what it can't prove is that the
+      # gateway accepted the route and resolved its backend, which is what makes harbor.<domain>
+      # actually reachable. Assert both parent conditions across the HTTPRoute (driver-agnostic;
+      # an external curl would depend on runner->LoadBalancer routing this doesn't guarantee).
+      - name: Verify Harbor is reachable through the gateway
+        if: success() && matrix.scenario.name == 'registry'
+        run: |
+          for _ in $(seq 30); do
+            conds=$(kubectl -n registry get httproute harbor \
+              -o jsonpath='{.status.parents[*].conditions[?(@.type=="Accepted")].status} {.status.parents[*].conditions[?(@.type=="ResolvedRefs")].status}' 2>/dev/null || true)
+            case "$conds" in
+              *False*|*Unknown*|" "|"") sleep 5 ;;
+              *True*) echo "harbor route programmed: $conds"; exit 0 ;;
+              *) sleep 5 ;;
+            esac
+          done
+          echo "harbor HTTPRoute not programmed by the gateway (Accepted/ResolvedRefs): '$conds'" >&2
+          kubectl -n registry get httproute harbor -o yaml >&2 || true
+          exit 1
 
       - name: Diagnostics on failure
         if: failure()
@@ -210,6 +246,10 @@ jobs:
           kubectl -n system-identity get events --sort-by=.lastTimestamp || true
           kubectl -n system-identity describe pods || true
           kubectl -n provisioning logs job/keycloak-omni-saml-client --tail=200 || true
+          kubectl -n registry get events --sort-by=.lastTimestamp || true
+          kubectl -n registry describe pods || true
+          kubectl -n registry get httproute harbor -o yaml || true
+          kubectl -n registry logs -l app.kubernetes.io/name=harbor --tail=200 || true
           flux get all -A || true
 
       - name: Windsor Down

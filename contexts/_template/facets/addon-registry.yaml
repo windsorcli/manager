@@ -1,0 +1,125 @@
+kind: Facet
+apiVersion: blueprints.windsorcli.dev/v1alpha1
+metadata:
+  name: registry
+  description: Fleet container registry (Harbor)
+
+# See ADR-0008 for why Harbor rather than a second bare distribution cache, and for
+# the two-phase plan this facet only implements Phase 1 of: local admin auth, no
+# OIDC/proxy-cache/GC yet. registry.driver is capability-plus-driver, the same shape
+# identity.driver/database.postgres.driver use — one driver today, room for another
+# without a breaking schema change later.
+when: registry.enabled == true && (registry.driver ?? 'harbor') == 'harbor'
+
+requires:
+  - paths:
+      - gateway.enabled
+    message: Harbor's UI/API are reached over HTTPS through the cluster gateway — enable the gateway.
+  - when: dev != true
+    paths:
+      - registry.harbor.admin_password
+    message: Harbor requires a local admin password outside dev mode. Set registry.harbor.admin_password via a secret() reference.
+
+# =============================================================================
+# Terraform — object-store bucket
+# =============================================================================
+# A separate stack from image-factory's own object-store invocation, same module,
+# different bucket and destroy policy — see ADR-0008 decision 4. force_destroy stays
+# off (the module's default is on): Harbor holds images an operator or CI pipeline
+# pushed, not a cache the source regenerates on a miss.
+terraform:
+
+  - name: harbor-object-store
+    path: object-store/hetzner
+    when: object_store.driver == 'hetzner'
+    inputs:
+      access_key: ${hetzner.object_storage.access_key ?? env("HETZNER_S3_ACCESS_KEY")}
+      secret_key: ${hetzner.object_storage.secret_key ?? env("HETZNER_S3_SECRET_KEY")}
+      location: "${hetzner.object_storage.location ?? 'fsn1'}"
+      force_destroy: false
+      buckets:
+        - "${object_store.prefix}-harbor"
+
+  - name: harbor-object-store
+    path: object-store/aws
+    when: object_store.driver == 'aws'
+    inputs:
+      region: ${aws.region}
+      force_destroy: false
+      buckets:
+        - "${object_store.prefix}-harbor"
+
+config:
+  # The CloudNativePG operator (Core's database facet) is install-only — it manages
+  # Cluster CRs but creates none; install/database/database.yaml is the Cluster this
+  # facet supplies directly, the same shape Keycloak's own facet uses. An operator's
+  # own explicit false still wins (raw values merge over facet-computed config last).
+  # driver is re-stated (not just enabled) because addon-database.yaml's own flux
+  # entry gates on database.postgres.driver == 'cloudnativepg' with no ?? fallback of
+  # its own — the same pattern addon-identity.yaml uses for this exact dependency.
+  - name: database
+    value:
+      postgres:
+        enabled: true
+        driver: "${database.postgres.driver ?? 'cloudnativepg'}"
+
+  - name: harbor_effective
+    value:
+      hostname: >-
+        ${registry.harbor.hostname
+          ?? ('harbor.' + ((dns.public_domain ?? '') == ''
+                ? (dns.private_domain ?? dns.domain ?? '')
+                : dns.public_domain))}
+      admin_password: >-
+        ${(registry.harbor.admin_password ?? '') != '' ? registry.harbor.admin_password :
+        (dev == true ? 'harbor-dev-admin-password' : '')}
+
+# =============================================================================
+# Flux system — Harbor
+# =============================================================================
+# pki-install issues the TLS certificate the gateway serves harbor.<domain> under;
+# gateway-install supplies the route CRDs; database-install is the CNPG operator this
+# facet's own harbor-db Cluster (install/database) depends on existing first. Named
+# "registry" (not "harbor") to match its kustomize path implicitly — same relationship
+# Core's own "identity" flux system has to the keycloak-specific pieces inside it.
+#
+flux:
+
+  - name: registry
+    dependsOn:
+      - pki-install
+      - database-install
+      - "${gateway.enabled == true ? 'gateway-install' : ''}"
+    secrets:
+      harbor-admin-password:
+        data:
+          HARBOR_ADMIN_PASSWORD: ${harbor_effective.admin_password}
+      harbor-registry-s3:
+        data:
+          REGISTRY_STORAGE_S3_ACCESSKEY: ${hetzner.object_storage.access_key ?? env("HETZNER_S3_ACCESS_KEY") ?? ''}
+          REGISTRY_STORAGE_S3_SECRETKEY: ${hetzner.object_storage.secret_key ?? env("HETZNER_S3_SECRET_KEY") ?? ''}
+    install:
+      components:
+        - database
+        - harbor
+        - "${object_store.driver == 'hetzner' || object_store.driver == 'aws' ? 'harbor/s3' : ''}"
+      substitutions:
+        harbor_hostname: "${harbor_effective.hostname}${workstation.runtime == 'docker-desktop' ? ':8443' : ''}"
+        harbor_storage_class: "${cluster.storage.class ?? 'single'}"
+        harbor_registry_size: "${registry.harbor.registry_size ?? '20Gi'}"
+        # Same expression the terraform block above hands the bucket module, so the
+        # registry and the bucket that gets provisioned cannot drift apart.
+        harbor_registry_bucket: "${object_store.prefix}-harbor"
+        harbor_registry_region: "${object_store.region ?? ''}"
+        harbor_registry_endpoint: "${object_store.endpoint ?? ''}"
+      timeout: 15m
+      interval: 5m
+    resources:
+      - dependsOn:
+          - gateway-resources
+        components:
+          - harbor/gateway
+        substitutions:
+          external_domain: "${(dns.public_domain ?? '') == '' ? (dns.private_domain ?? dns.domain ?? '') : dns.public_domain}"
+        timeout: 10m
+        interval: 5m
