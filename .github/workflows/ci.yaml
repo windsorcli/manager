@@ -381,7 +381,7 @@ jobs:
           claude_args: |
             --model claude-sonnet-4-6
             --max-turns 50
-            --allowedTools Read,Write,Bash(cat:*),Bash(kubectl:*),Bash(tail:*),Bash(head:*),Bash(grep:*),Bash(jq:*)
+            --allowedTools Read,Write,Bash(cat:*),Bash(kubectl get:*),Bash(kubectl describe:*),Bash(kubectl logs:*),Bash(kubectl events:*),Bash(tail:*),Bash(head:*),Bash(grep:*),Bash(jq:*)
             --disallowedTools WebSearch,WebFetch
 
       # Deterministic publish. Runs even if the Claude step errored or hit the
