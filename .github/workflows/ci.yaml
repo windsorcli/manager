@@ -138,6 +138,11 @@ jobs:
     name: Integration (${{ matrix.scenario.name }})
     runs-on: ubuntu-latest
     timeout-minutes: ${{ matrix.scenario.job_timeout }}
+    # Job-level block replaces the workflow-level one outright rather than merging —
+    # issues: write is only needed here, to post the Claude diagnosis comment below.
+    permissions:
+      contents: read
+      issues: write
     strategy:
       fail-fast: false
       matrix:
@@ -254,6 +259,159 @@ jobs:
           kubectl -n registry get httproute harbor -o yaml || true
           kubectl -n registry logs -l app.kubernetes.io/name=harbor --tail=200 || true
           flux get all -A || true
+
+      # -----------------------------------------------------------------------
+      # Claude investigation (read-only, first-push-only)
+      # -----------------------------------------------------------------------
+      # A cheap bash orientation glance, then Claude investigates the LIVE
+      # cluster interactively (it's still up at this point, ahead of Windsor
+      # Down) until it finds root cause, then a deterministic publish. Gated on
+      # the PR-open event so it runs at most once per PR — a rebase is a
+      # `synchronize` event and is never eligible, and a breaking change
+      # rebased into many open PRs cannot trigger a storm.
+      - name: Collect cluster glance
+        id: seed
+        if: failure() && github.event_name == 'pull_request' && github.event.action == 'opened'
+        run: |
+          SEED=/tmp/cluster-glance.txt
+          {
+            echo "# Kustomizations"
+            kubectl get kustomizations -A 2>&1 || true
+            echo
+            echo "# HelmReleases"
+            kubectl get helmreleases -A 2>&1 || true
+            echo
+            echo "# Pods not Running/Succeeded"
+            kubectl get pods -A --field-selector=status.phase!=Running,status.phase!=Succeeded 2>&1 || true
+            echo
+            echo "# Recent Warning events"
+            kubectl get events -A --field-selector type=Warning --sort-by=.lastTimestamp 2>&1 | tail -n 30 || true
+          } > "$SEED" 2>&1
+          echo "Wrote $(wc -l < "$SEED") lines to $SEED"
+
+      - name: Investigate failure with Claude
+        if: always() && steps.seed.outcome == 'success' && github.event_name == 'pull_request' && github.event.action == 'opened'
+        uses: anthropics/claude-code-action@6b082c41935b4c8a3b8b0ef85ba4ba4d9eeb8975 # v1.0.189
+        env:
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          RUN_ID: ${{ github.run_id }}
+          COMMIT_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          SCENARIO: ${{ matrix.scenario.name }}
+          DIAGNOSIS_MARKER: "<!-- claude-integration-${{ matrix.scenario.name }}-diagnosis -->"
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          allowed_bots: "renovate"
+          prompt: |
+            The integration test just failed and the local Windsor cluster is
+            STILL RUNNING on this runner — you can inspect it live. Investigate
+            it directly and keep going until you have found the actual root
+            cause, then write your diagnosis.
+
+            ## Context — scenario
+
+            SCENARIO=`$SCENARIO`:
+              - `provisioning` — brings up Image Factory, Omni, and Keycloak.
+                                 Verifies the omni saml-client Job registered.
+              - `registry`     — brings up Harbor and its CNPG database.
+                                 Verifies the harbor HTTPRoute is programmed.
+
+            ## How to investigate
+
+            Start by reading the orientation glance: `cat
+            /tmp/cluster-glance.txt`. It lists what's red (flux kustomizations,
+            helmreleases, non-running pods, recent Warning events). It is only
+            a starting point — not the answer.
+
+            From there, investigate the live cluster yourself with plain
+            `kubectl` (no wrapper needed in this repo). Follow the failure
+            down its causal chain until you can name the specific broken
+            object and *why* it broke — e.g. a red Kustomization → the
+            HelmRelease or objects it owns → the pods → their logs
+            (`kubectl logs`, add `--previous` for crash-loopers) → the events →
+            the source it reconciles from. Do not stop at the first symptom;
+            distinguish the true root cause from downstream casualties. Prefer
+            targeted, tailed output over dumping full YAML, and don't inspect
+            healthy resources.
+
+            This is READ-ONLY. Do NOT apply, delete, edit, restart, scale, or
+            otherwise mutate the cluster — inspect only.
+
+            ## Write early, refine as you go
+
+            As soon as you have a working hypothesis, write `/tmp/diagnosis.md`
+            in the format below, then keep updating it in place as you confirm
+            or revise. If this step is cut short, whatever is in the file is
+            what ships — so never leave it empty once you have any signal.
+
+            ## Diagnosis format (write to /tmp/diagnosis.md)
+
+              $DIAGNOSIS_MARKER
+              > [!CAUTION]
+              >
+              > ## 🩺 Integration diagnosis — scenario: `$SCENARIO`
+              >
+              > **Commit:** `<short SHA of COMMIT_SHA>` · **Run:** [#$RUN_ID]($RUN_URL)
+              >
+              > **Likely cause:** {one sentence}
+              >
+              > **Evidence:** {2-4 sentences citing the specific resource,
+              > condition, and log snippet that points at the cause. Quote log
+              > lines inline with backticks.}
+              >
+              > **Suggested next step:** {one actionable sentence}
+              <!-- /claude-integration-$SCENARIO-diagnosis -->
+
+            The marker lines are required — a later CI step uses them to anchor
+            the published comment. Your only output is `/tmp/diagnosis.md`; do
+            NOT post comments, touch the step summary, or write anywhere else.
+            A separate CI step publishes the result.
+          claude_args: |
+            --model claude-sonnet-4-6
+            --max-turns 50
+            --allowedTools Read,Write,Bash(cat:*),Bash(kubectl:*),Bash(tail:*),Bash(head:*),Bash(grep:*),Bash(jq:*)
+            --disallowedTools WebSearch,WebFetch
+
+      # Deterministic publish. Runs even if the Claude step errored or hit the
+      # turn cap, so a cut-short investigation still ships whatever it wrote —
+      # or a stub pointing at the run. Never charges tokens.
+      - name: Publish diagnosis
+        if: always() && steps.seed.outcome == 'success' && github.event_name == 'pull_request' && github.event.action == 'opened'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          SCENARIO: ${{ matrix.scenario.name }}
+          MARKER: "<!-- claude-integration-${{ matrix.scenario.name }}-diagnosis -->"
+          END_MARKER: "<!-- /claude-integration-${{ matrix.scenario.name }}-diagnosis -->"
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          DIAG=/tmp/diagnosis.md
+          if [ ! -s "$DIAG" ]; then
+            printf '%s\n' \
+              "$MARKER" \
+              "> [!CAUTION]" \
+              ">" \
+              "> ## 🩺 Integration diagnosis — scenario: \`$SCENARIO\`" \
+              ">" \
+              "> Automated inspection did not complete. See the [run]($RUN_URL) for manual triage." \
+              "$END_MARKER" > "$DIAG"
+          fi
+          {
+            echo "## Integration diagnosis — scenario: $SCENARIO"
+            cat "$DIAG"
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ -n "$PR_NUMBER" ]; then
+            EXISTING_ID=$(gh api --paginate "repos/$GH_REPO/issues/$PR_NUMBER/comments" \
+              --jq ".[] | select(.body | contains(\"$MARKER\")) | .id" | head -n1)
+            if [ -n "$EXISTING_ID" ]; then
+              gh api -X PATCH "repos/$GH_REPO/issues/comments/$EXISTING_ID" \
+                --field body=@"$DIAG"
+            else
+              gh api -X POST "repos/$GH_REPO/issues/$PR_NUMBER/comments" \
+                --field body=@"$DIAG"
+            fi
+          fi
 
       - name: Windsor Down
         if: always()
