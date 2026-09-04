@@ -1,16 +1,16 @@
 ---
 title: "ADR-0008: Harbor — a fleet registry, not another bare distribution cache"
-description: "Image Factory's own facet already names the gap it's working around: its in-cluster registry is a bare `distribution` cache with no scanning, no RBAC, no UI, and no replication, and its docs say plainly that once Manager's Harbor lands, the factory points at it instead. This ADR picks Harbor (the official `goharbor/harbor-helm` chart) as that fleet-wide registry, deployed the same way every other stateful addon in this repo is: a dedicated CloudNativePG Postgres Cluster (Keycloak's own precedent, not the chart's bundled database), object_store-backed S3 storage in its own bucket (not shared with Image Factory's), the chart's bundled Redis (no shared-Redis precedent exists to build on, and Redis holds nothing that needs to survive a restart), and exposure through the shared gateway. It ships in two phases: Phase 1 gets Harbor up, reachable, and locally authenticated — nothing else points at it yet. Phase 2 wires OIDC via an admin-API Job (Harbor has no CRD/values-level OIDC, unlike Keycloak's realm import), turns on proxy-cache projects for the reduced-egress/air-gapped motivation, migrates Image Factory's registry onto Harbor, and schedules garbage collection. This mirrors ADR-0004's own phasing discipline — ship the reachable thing first, defer what depends on it actually being useful."
+description: "Image Factory's own facet already names the gap it's working around: its in-cluster registry is a bare `distribution` cache with no scanning, no RBAC, no UI, and no replication, and its docs say plainly that once Manager's Harbor lands, the factory points at it instead. This ADR picks Harbor (the official `goharbor/harbor-helm` chart) as that fleet-wide registry, deployed the same way every other stateful addon in this repo is: a dedicated CloudNativePG Postgres Cluster (Keycloak's own precedent, not the chart's bundled database), object_store-backed S3 storage in its own bucket (not shared with Image Factory's), the chart's bundled Redis (no shared-Redis precedent exists to build on, and Redis holds nothing that needs to survive a restart), and exposure through the shared gateway. SSO against Core's Keycloak realm ships alongside the initial deployment, wired through an admin-API Job the same shape Omni's own SAML client registration uses (Harbor has no CRD/values-level OIDC). Deferred: proxy-cache projects for the reduced-egress/air-gapped motivation, migrating Image Factory's own registry onto Harbor, and scheduled garbage collection — each waits on Harbor being proven reachable and authenticated first, the same phasing discipline ADR-0004 used for Omni."
 ---
 
 # ADR-0008: Harbor — a fleet registry, not another bare distribution cache
 
 ## Status
 
-Proposed (2026-08-09). Depends on [ADR-0001](0001-layering-on-core.md). Phase 1 needs
-`gateway` and Core's `database` (CloudNativePG operator) turned on, and Manager's own
-`object_store` resolution (`config-object-store.yaml`) — no new ADR-level dependency there,
-it's the same config `addon-image-factory.yaml` already reads. Phase 2's OIDC step depends on
+Proposed (2026-08-09). Depends on [ADR-0001](0001-layering-on-core.md). Needs `gateway` and
+Core's `database` (CloudNativePG operator) turned on, and Manager's own `object_store`
+resolution (`config-object-store.yaml`) — no new ADR-level dependency there, it's the same
+config `addon-image-factory.yaml` already reads. The OIDC step depends on
 [ADR-0002](0002-identity.md) (the platform Keycloak realm) the same way
 [ADR-0004](0004-omni.md) decision 2 does. Referenced by [ADR-0007](../roadmap-v0.1.0.md)
 (Manager's own state) once it exists — Harbor's Postgres and bucket join Omni's etcd and the
@@ -38,16 +38,19 @@ replication/mirroring story, reachable only in-cluster. That's fine for what it 
 generated schematics and cached boot assets nothing else touches), but it's not something a
 second consumer should share, and it's not something an operator can browse, scan, or point a
 CI pipeline's `docker push` at. Harbor is the natural answer to both: a real fleet registry
-general enough for CI/operator pushes, and (via proxy-cache projects, Phase 2) a pull-through
-mirror downstream clusters can use instead of reaching `ghcr.io`/`docker.io` directly.
+general enough for CI/operator pushes, and (via proxy-cache projects, still deferred) a
+pull-through mirror downstream clusters can use instead of reaching `ghcr.io`/`docker.io`
+directly.
 
 ## Decision
 
-**1. Deploy Harbor via the official `goharbor/harbor-helm` chart, in two phases.** Phase 1:
-Harbor up, reachable through the gateway, locally authenticated (the chart's own bootstrap
-admin), with nothing else in the fleet pointed at it yet. Phase 2: OIDC against Keycloak,
-proxy-cache projects for reduced egress, Image Factory's registry migrated onto Harbor, and
-scheduled garbage collection. This is the same phasing discipline ADR-0004 used for Omni —
+**1. Deploy Harbor via the official `goharbor/harbor-helm` chart, with SSO shipped
+alongside it and three items still deferred.** Delivered: Harbor up, reachable through the
+gateway, SSO against Keycloak wired the same way Omni's own SAML client registration is
+(decision 6). Deferred: proxy-cache projects for reduced egress, Image Factory's registry
+migrated onto Harbor, and scheduled garbage collection — each waits on Harbor being proven
+reachable and authenticated first. This is the same phasing discipline ADR-0004 used for
+Omni —
 land the reachable thing, defer what depends on it being proven — not a new pattern.
 
 The schema is `registry.enabled` / `registry.driver` (default `harbor`) /
@@ -56,13 +59,13 @@ The schema is `registry.enabled` / `registry.driver` (default `harbor`) /
 Core, so a second registry driver (if one is ever needed) is additive, not a breaking
 schema change. The kustomize directory is `kustomize/registry/`, not `kustomize/harbor/`,
 for the same reason `observability`/`provisioning` are category names rather than product
-names — Phase 2's Image Factory migration is exactly the kind of second tenant that
+names — the still-deferred Image Factory migration is exactly the kind of second tenant that
 directory is already shaped to hold. The Kubernetes namespace is `registry` for the same
 reason: every namespace in the fleet is a category name (`provisioning`, `system-identity`,
 `system-gateway`), never the product that happens to fill it — `system-identity` is
 essentially just Keycloak yet still takes the category name. `registry` carries no
 `system-` prefix, matching `provisioning`, since Core reserves that prefix for its own
-infra. Harbor's own resources keep their `harbor`/`harbor-*` names inside it, and Phase 2's
+infra. Harbor's own resources keep their `harbor`/`harbor-*` names inside it, and the deferred
 Image Factory migration lands as a second tenant of the same namespace. The flux
 Kustomization name is `registry` (matching the directory implicitly, no `path:` override
 needed), the same relationship Core's own `identity` flux system has to the keycloak-specific
@@ -75,7 +78,7 @@ pointed at a `harbor-db` `Cluster` this facet creates directly (mirroring
 database and owner role, CNPG auto-publishes the `harbor-db-app` credentials Secret and the
 `harbor-db-rw` Service. Keycloak's CR-level `truststores`/`sslfactory` CA-trust wiring has no
 Harbor-chart equivalent — Harbor's external-DB support is coarser (a `sslmode` string, no
-CA-bundle field) — so Phase 1 ships without `sslmode=verify-full`'s CA validation until that
+CA-bundle field) — so this ships without `sslmode=verify-full`'s CA validation until that
 gap is confirmed closeable; revisit once the exact `existingSecret` key contract Harbor's
 chart expects is confirmed against the pinned chart version, not paraphrased docs.
 
@@ -110,20 +113,32 @@ Omni), not Harbor's own ingress-oriented defaults. Needs explicit long timeouts 
 HTTPRoute for blob pushes, the same `timeouts: {request: 5m, backendRequest: 5m}` shape
 Image Factory's own route already sets. **Open implementation risk, not resolved by this
 ADR**: nginx's `proxy-body-size: 0` (unlimited chunked-upload body) has no confirmed Gateway
-API/Envoy/Cilium equivalent yet — needs a spike against both gateway drivers before Phase 1 is
-considered done, not a design decision to guess at here.
+API/Envoy/Cilium equivalent yet — needs a spike against both gateway drivers before this is
+considered done, not a design decision to guess at here. The gateway route is its own
+resources variant, not a `requires:` on installing Harbor at all — the same shape
+`addon-observability.yaml` uses for Grafana's own route, so Harbor still installs without a
+gateway (reachable by port-forwarding the `harbor` Service) rather than failing composition.
 
-**6. Auth is local-admin-only in Phase 1; OIDC via an admin-API Job in Phase 2 — not Helm
-values.** Unlike Keycloak's `KeycloakRealmImport` CRD, Harbor's chart has no OIDC
-configuration surface at all; OIDC is a post-boot REST call against the bootstrap admin
-session. Phase 2 registers it the same way Omni's `omni/saml-client` Job registers Omni's SAML
-client: an admin-API Job, not a values field. Until then, Harbor carries its own local admin
-credential, materialized the same way every other bootstrap-admin secret in this repo is.
+**6. SSO is an admin-API Job, not a Helm value — Harbor's chart has no OIDC configuration
+surface at all.** Unlike Keycloak's `KeycloakRealmImport` CRD, turning Harbor's auth mode to
+OIDC is a post-boot REST call against the bootstrap admin session, so `harbor/oidc` registers
+the OIDC client in the platform realm and then configures Harbor over its own API, not a
+values field. It's a named `oidc` resources variant of the `registry` flux system
+(`registry-resources-oidc`, `dependsOn: [registry-install, identity-resources]`) — the same
+shape `addon-identity.yaml` uses to sequence its own `database` resources variant ahead of the
+Keycloak CR — rather than a component of Harbor's install tier, so Harbor's install and gateway
+route come up regardless of whether identity is enabled. That's a deliberate difference from
+Omni's own `omni/saml-client` Job, which *is* a component of `omni-install` and accepts an
+unconditional `dependsOn: [identity-resources]` on the whole system: Omni has no toggle to run
+without identity, Harbor does — `registry.harbor.sso` (default `true`) turns it off explicitly
+if an operator wants Harbor on local-admin auth even with identity enabled. Harbor's own local
+admin credential still exists either way, materialized the same way every other bootstrap-admin
+secret in this repo is — SSO adds a second login path, it doesn't replace the first.
 
 ## Consequences
 
-- Two independently-authenticated OCI registries run in the fleet from Phase 1 through
-  whenever Phase 2's migration lands: Image Factory's own `registry` component (schematics,
+- Two independently-authenticated OCI registries run in the fleet until
+  the still-deferred Image Factory migration lands: Image Factory's own `registry` component (schematics,
   cached boot assets) and Harbor (everything else). That's a deliberate, named consequence of
   the phasing, not an oversight — collapsing them on day one would mean shipping Harbor's
   OIDC/migration work before Harbor itself is proven reachable.
@@ -145,11 +160,11 @@ credential, materialized the same way every other bootstrap-admin secret in this
   (scans run on push/schedule, not continuously), not the steady-state assumption a fixed
   multiplier would imply.
 - The CNPG CA-trust gap in decision 2 means Harbor's database connection may ship without
-  full TLS certificate verification in Phase 1 — flagged explicitly so it isn't silently
+  full TLS certificate verification — flagged explicitly so it isn't silently
   carried forward as if it were resolved.
-- Phase 2's proxy-cache motivation (mirroring `ghcr.io`/`docker.io` for downstream clusters)
+- The still-deferred proxy-cache motivation (mirroring `ghcr.io`/`docker.io` for downstream clusters)
   depends on Harbor's own per-registry-provider support; native `ghcr.io` proxy-cache support
-  is community-reported working, not officially documented — Phase 2 needs to confirm this
+  is community-reported working, not officially documented — that work needs to confirm this
   against the pinned Harbor version before downstream clusters are pointed at it, not assume
   it from this ADR.
 - ADR-0007 (Manager's own state, not yet written) now has a second Postgres Cluster and a

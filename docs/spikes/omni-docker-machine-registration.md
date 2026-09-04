@@ -35,7 +35,7 @@ real hardware.
 ### What was tried
 
 1. Logged into the local Omni UI (`https://omni.test:8443`) with the dev admin
-   account (`admin@local.test` / `admin-password`, seeded by Core's `dev-user`
+   account (`dev-admin@local.test` / `admin-password`, seeded by Core's `dev-user`
    component when `dev == true`).
 2. Downloaded a machine join config from Omni's home page ("Download Machine Join
    Config"):

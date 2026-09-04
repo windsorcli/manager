@@ -1,6 +1,6 @@
 ---
 title: Registry
-description: Self-hosted fleet container registry (Harbor) — Phase 1 of ADR-0008, reachable and locally authenticated.
+description: Self-hosted fleet container registry (Harbor), reachable through the gateway.
 ---
 
 # Registry
@@ -9,21 +9,16 @@ The fleet's own container registry: [Harbor](https://goharbor.io), not another b
 [`distribution`](https://github.com/distribution/distribution) cache. Image Factory's own
 `registry` component already fills that narrower role (schematics and cached boot assets,
 anonymous, no UI); Harbor is the general-purpose registry an operator or CI pipeline can
-actually push to, browse, and (Phase 2) scan and mirror from. See
-[ADR-0008](/docs/adr/0008-harbor.md) for the full decision record and the two-phase plan —
-this add-on implements Phase 1 only: Harbor up, reachable through the gateway, locally
-authenticated. Nothing else in the fleet points at it yet.
+push to and browse. It comes up reachable through the gateway with local admin auth.
 
 Installs the official `goharbor/harbor-helm` chart. Hard external dependencies:
 
 - **A dedicated Postgres.** A `harbor-db` CloudNativePG `Cluster` this facet creates
   directly — the same shape Core's own Keycloak facet uses, not the chart's bundled
   database. `sslmode` stays `disable`: unlike Keycloak's operator CR, this chart has no
-  CA-bundle field to trust CNPG's own cluster CA with (a known Phase 1 gap, not silently
-  papered over).
-- **A local admin password** outside dev mode — the chart's only auth method until Phase 2
-  wires OIDC via an admin-API Job (Harbor has no CRD/values-level OIDC, unlike Keycloak's
-  realm import).
+  CA-bundle field to trust CNPG's own cluster CA with.
+- **A local admin password** outside dev mode — Harbor's local auth. SSO via Core's
+  identity is wired through an admin-API Job when identity is enabled.
 - **A gateway.** Harbor's UI/API are reached through Core's canonical `external` Gateway,
   TLS terminating there — Harbor itself serves plain HTTP.
 
@@ -36,15 +31,13 @@ registry component is the same `distribution` storage layout Image Factory's alr
 shared bucket risks a real path collision, not just an untidy one; and the two buckets want
 different destroy semantics — Image Factory's holds a rebuildable cache
 (`force_destroy: true`), Harbor's holds images an operator or CI pipeline pushed and can't
-necessarily regenerate (`force_destroy: false`). See
-[ADR-0008](/docs/adr/0008-harbor.md) decision 4.
+necessarily regenerate (`force_destroy: false`).
 
 ## Routing
 
 Reachable at `harbor.<domain>` through the shared gateway, with explicit long timeouts on the
 HTTPRoute (`request`/`backendRequest: 5m`) for OCI blob pushes — the same shape Image
-Factory's own route already sets. Whether Envoy/Cilium need an additional large-body policy
-beyond that timeout is an open spike ADR-0008 flags, not resolved here.
+Factory's own route already sets.
 
 ## Configuration
 
@@ -61,23 +54,29 @@ beyond that timeout is an open spike ADR-0008 flags, not resolved here.
 | `harbor_registry_region` | `harbor/s3` | Region embedded in the S3 v4 signature, from `object_store.region`. |
 | `harbor_registry_endpoint` | `harbor/s3` | S3 endpoint the registry writes to, from `object_store.endpoint`. |
 | `external_domain` | always | Domain the gateway route publishes under; the hostname is `harbor.<external_domain>`. Public domain when set, otherwise the private domain or the cluster domain. |
+| `keycloak_realm` | `harbor/oidc` | Identity realm the OIDC client registers against, from `identity_effective.realm`. |
+| `oidc_issuer` | `harbor/oidc` | External OIDC discovery issuer, from `identity_effective.issuer`. |
+| `oidc_admin_group` | `harbor/oidc` | Keycloak group mapped to Harbor's admin role via the OIDC groups claim. Fixed at `platform-admins`. |
+| `oidc_verify_cert` | `harbor/oidc` | Whether Harbor verifies the identity provider's TLS certificate. False only in dev mode. |
 
 ## Components
 
 | Component | Enable when | Effect |
 |---|---|---|
-| `database` | always | Dedicated CloudNativePG `Cluster` (`harbor-db`) — Harbor's Postgres, not the chart's bundled one. See ADR-0008 decision 2. |
-| `harbor` | always | Helm release of the official `goharbor/harbor-helm` chart in `harbor`. Local admin auth only in Phase 1 — see ADR-0008. |
-| `harbor/s3` | `object_store.driver` is `hetzner` or `aws` | Backs the registry with a bucket from the platform's object store instead of a PVC. Own bucket, own destroy policy — not shared with image-factory's. See ADR-0008 decision 4. |
-| `harbor/gateway` | always | HTTPRoute on Core's canonical `external` Gateway. Lives in the resources tier and depends on `gateway-resources`. |
+| `database` | always | Dedicated CloudNativePG `Cluster` (`harbor-db`) — Harbor's Postgres, not the chart's bundled one. |
+| `harbor` | always | Helm release of the official `goharbor/harbor-helm` chart in `harbor`. Local admin auth. |
+| `harbor/s3` | `object_store.driver` is `hetzner` or `aws` | Backs the registry with a bucket from the platform's object store instead of a PVC. Own bucket, own destroy policy — not shared with image-factory's. |
+| `harbor/oidc` | `identity.enabled == true` and `registry.harbor.sso` is not explicitly false | Admin-API Job that registers Harbor's OIDC client in the platform realm and configures Harbor for OIDC auth, group-mapped to `platform-admins`. A named `oidc` resources variant of the `registry` flux system (`registry-resources-oidc`) so it depends on identity without gating Harbor's install or gateway route. |
+| `harbor/gateway` | `gateway.enabled == true` | HTTPRoute on Core's canonical `external` Gateway. Lives in the resources tier and depends on `gateway-resources`. Without a gateway, reach Harbor by port-forwarding the `harbor` Service in `registry`. |
 
 ## Dependencies
 
 | Add-on | Required when | Reason |
 |---|---|---|
 | `pki` | always | Harbor is served over TLS, and the certificate is issued by the cluster issuer cert-manager installs. |
-| `gateway` | always | The route CRDs have to exist before the chart renders an HTTPRoute. |
+| `gateway` | `gateway.enabled == true` | The route CRDs have to exist before the chart renders an HTTPRoute. |
 | `database` | always | The CloudNativePG operator has to exist before this facet's own `harbor-db` Cluster can reconcile. |
+| `identity` | `harbor/oidc` | The OIDC client registers against the platform realm's admin API. |
 
 <!-- END_KUSTOMIZE_DOCS -->
 
@@ -108,18 +107,3 @@ registry:
   harbor:
     admin_password: ${secret("Developer", "harbor", "admin_password")}
 ```
-
-## Not covered yet (Phase 2)
-
-- **OIDC.** Local admin auth only — see ADR-0008 decision 6 for why this needs a Job, not a
-  values field.
-- **Proxy-cache projects.** The actual "reduce egress / air-gapped" motivation — mirroring
-  `ghcr.io`/`docker.io` so downstream clusters pull from Harbor instead. Native `ghcr.io`
-  proxy-cache support is community-reported, not officially documented; needs confirming
-  against the pinned chart version before downstream clusters are pointed at it.
-- **Image Factory migration.** Image Factory's own `registry` component keeps running
-  independently until this lands — two OCI registries coexist in the fleet until then, a
-  named consequence of the phasing, not an oversight.
-- **Garbage collection scheduling.** Harbor's GC is a REST API call against a running
-  instance, not a standalone binary — needs a CronJob-shaped Job, the same pattern the OIDC
-  bootstrap Job will use.

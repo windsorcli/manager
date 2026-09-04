@@ -316,7 +316,7 @@ flux:
         # Core's own dev admin (keycloak/realm/dev-user), so a SAML login with
         # that same identity is recognized immediately — not a separate,
         # unrelated placeholder identity.
-        omni_initial_admins: "${provisioning.omni.initial_admins ?? (dev == true ? ['admin@local.test'] : [])}"
+        omni_initial_admins: "${provisioning.omni.initial_admins ?? (dev == true ? ['dev-admin@local.test'] : [])}"
         omni_wireguard_node_port: "${omni_effective.wireguard_node_port}"
         omni_wireguard_advertised_endpoint: "${omni_effective.wireguard_advertised_endpoint}"
         # The chart fetches this itself, server-side, so the internal (backchannel)

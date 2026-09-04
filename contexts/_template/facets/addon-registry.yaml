@@ -4,17 +4,12 @@ metadata:
   name: registry
   description: Fleet container registry (Harbor)
 
-# See ADR-0008 for why Harbor rather than a second bare distribution cache, and for
-# the two-phase plan this facet only implements Phase 1 of: local admin auth, no
-# OIDC/proxy-cache/GC yet. registry.driver is capability-plus-driver, the same shape
-# identity.driver/database.postgres.driver use — one driver today, room for another
-# without a breaking schema change later.
+# registry.driver is capability-plus-driver, the same shape identity.driver and
+# database.postgres.driver use — one driver (harbor) today, room for another without a
+# breaking schema change.
 when: registry.enabled == true && (registry.driver ?? 'harbor') == 'harbor'
 
 requires:
-  - paths:
-      - gateway.enabled
-    message: Harbor's UI/API are reached over HTTPS through the cluster gateway — enable the gateway.
   - when: dev != true
     paths:
       - registry.harbor.admin_password
@@ -24,9 +19,8 @@ requires:
 # Terraform — object-store bucket
 # =============================================================================
 # A separate stack from image-factory's own object-store invocation, same module,
-# different bucket and destroy policy — see ADR-0008 decision 4. force_destroy stays
-# off (the module's default is on): Harbor holds images an operator or CI pipeline
-# pushed, not a cache the source regenerates on a miss.
+# different bucket and destroy policy. force_destroy stays off (the module's default is
+# on): Harbor holds images an operator or CI pipeline pushed, not a cache regenerated on a miss.
 terraform:
 
   - name: harbor-object-store
@@ -73,6 +67,12 @@ config:
       admin_password: >-
         ${(registry.harbor.admin_password ?? '') != '' ? registry.harbor.admin_password :
         (dev == true ? 'harbor-dev-admin-password' : '')}
+      # SSO is on when identity hosts Keycloak, unless explicitly turned off. The Job
+      # only knows how to talk to Keycloak's admin API (identity.driver: oidc hosts
+      # nothing to register against, and creates no identity-resources to depend on).
+      # Also needs the gateway: the redirect URI it registers is the hosted server's
+      # gateway URL, and Harbor's own route is equally unreachable without one.
+      sso: ${identity.enabled == true && (identity.driver ?? 'keycloak') == 'keycloak' && gateway.enabled == true && (registry.harbor.sso ?? true) != false}
 
 # =============================================================================
 # Flux system — Harbor
@@ -115,11 +115,39 @@ flux:
       timeout: 15m
       interval: 5m
     resources:
-      - dependsOn:
+      # No hard requires: on gateway.enabled — Harbor's install doesn't need one (the
+      # chart's own expose.type stays clusterIP either way), the same posture
+      # addon-observability.yaml uses for Grafana. Without a gateway, reach Harbor by
+      # port-forwarding the harbor Service in the registry namespace.
+      - when: gateway.enabled == true
+        dependsOn:
           - gateway-resources
         components:
           - harbor/gateway
         substitutions:
           external_domain: "${(dns.public_domain ?? '') == '' ? (dns.private_domain ?? dns.domain ?? '') : dns.public_domain}"
         timeout: 10m
+        interval: 5m
+
+      # Harbor SSO configuration. A named resources variant, not a component of the
+      # install tier above, so it depends on identity without gating Harbor's own
+      # install or gateway route — the same shape addon-identity.yaml uses to
+      # sequence its database resources variant ahead of the Keycloak CR.
+      - name: oidc
+        when: harbor_effective.sso == true
+        dependsOn:
+          - registry-install
+          - identity-resources
+        components:
+          - harbor/oidc
+        substitutions:
+          harbor_hostname: "${harbor_effective.hostname}${workstation.runtime == 'docker-desktop' ? ':8443' : ''}"
+          keycloak_realm: "${identity_effective.realm}"
+          keycloak_admin_secret: "${(identity_effective.admin_password ?? '') != '' ? 'keycloak-bootstrap-admin' : 'keycloak-initial-admin'}"
+          oidc_issuer: "${identity_effective.issuer}"
+          oidc_admin_group: platform-admins
+          oidc_verify_cert: "${dev == true ? false : true}"
+        # At least the Job's own activeDeadlineSeconds (40m) — a shorter Flux
+        # timeout would give up before Kubernetes ever kills the Job itself.
+        timeout: 40m
         interval: 5m

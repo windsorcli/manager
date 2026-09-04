@@ -26,3 +26,4 @@ contexts/**/.gcp/
 # docs/ is committed, including docs/adr/ — decisions get reviewed in the PR that
 # makes them. docs/plans/ stays local; planning notes are not a record of anything.
 docs/plans/
+.claude/settings.local.json

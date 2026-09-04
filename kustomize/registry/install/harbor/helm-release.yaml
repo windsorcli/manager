@@ -23,8 +23,8 @@ spec:
         name: harbor
   values:
     externalURL: https://${harbor_hostname}
-    # Phase 1 (ADR-0008): local admin only. existingSecretAdminPasswordKey matches the
-    # chart's own default data key so the facet's secrets: block needs no extra mapping.
+    # Local admin auth. existingSecretAdminPasswordKey matches the chart's own default
+    # data key so the facet's secrets: block needs no extra mapping.
     existingSecretAdminPassword: harbor-admin-password
     existingSecretAdminPasswordKey: HARBOR_ADMIN_PASSWORD
 
@@ -36,8 +36,8 @@ spec:
         enabled: false
 
     # Dedicated CNPG Cluster (install/database/database.yaml), not the chart's bundled
-    # Postgres — see ADR-0008 decision 2. sslmode stays disable: unlike Keycloak's CR,
-    # this chart has no CA-bundle field to trust CNPG's own cluster CA with.
+    # Postgres. sslmode stays disable: unlike Keycloak's CR, this chart has no CA-bundle
+    # field to trust CNPG's own cluster CA with.
     database:
       type: external
       external:
@@ -48,8 +48,8 @@ spec:
         existingSecret: harbor-db-app
         sslmode: disable
 
-    # Bundled Redis (ADR-0008 decision 3) — cache/session/job-queue only, nothing that
-    # needs to survive a restart the way the database or registry blobs do.
+    # Bundled Redis — cache/session/job-queue only, nothing that needs to survive a
+    # restart the way the database or registry blobs do.
     redis:
       type: internal
       internal:
