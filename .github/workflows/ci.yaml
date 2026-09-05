@@ -202,12 +202,6 @@ jobs:
       # already close to that wall tips over it. Left at Core's default (the runner's full
       # core count) instead.
       #
-      # observability.enabled=false trims a real dev-mode default this suite doesn't verify:
-      # neither scenario's own checks touch Grafana, and turning it off also drops the
-      # keycloak/realm/clients/grafana patch from identity-resources itself (the one
-      # Kustomization provisioning's omni-resources-saml-client waits on), shortening that
-      # specific wait rather than just freeing CPU elsewhere.
-      #
       # --blueprint pins core to the digest in contexts/_template/blueprint.yaml. A project
       # with its own contexts/_template/ ignores that file's sources: entry for its own
       # windsor init, so this reads the digest out and passes it explicitly instead.
@@ -216,7 +210,6 @@ jobs:
           CORE_URL=$(grep -oE 'oci://ghcr\.io/windsorcli/core@sha256:[a-f0-9]+' contexts/_template/blueprint.yaml)
           windsor init local --reset \
             --set dns.domain=test \
-            --set observability.enabled=false \
             --blueprint "$CORE_URL" \
             ${{ matrix.scenario.sets }}
 
