@@ -30,7 +30,7 @@ spec:
     image:
       repository: ghcr.io/siderolabs/image-factory
       # renovate: datasource=docker depName=image-factory package=ghcr.io/siderolabs/image-factory
-      tag: v1.5.0@sha256:a2a55196bbf65da40fa8726dd7a5de0dd486bddb0f2171da1867aa2fc260be45
+      tag: v1.6.1@sha256:be57acadd96964fcea79704033d0223122a381531b45ec71823ab9ab1e39ec48
     # The chart supports only the Recreate strategy.
     strategy:
       type: Recreate
