@@ -1,7 +1,9 @@
 # =============================================================================
 # CI workflow
 # =============================================================================
-# Runs on push-to-main, tagged releases, and PRs against main.
+# Runs on push-to-main, tagged releases, PRs against main, and manual dispatch.
+# Manual dispatch runs against any branch — useful for a stacked PR, since the
+# pull_request trigger only fires for PRs based on main.
 #   code-checks — yamllint, shellcheck, terraform fmt, checkov
 #   tests       — terraform module tests, blueprint facet tests, prometheus rules
 #   integration — brings a local cluster up on the composed blueprint and tears it down
@@ -27,6 +29,7 @@ on:
   pull_request:
     branches:
       - main
+  workflow_dispatch:
 
 permissions:
   contents: read
