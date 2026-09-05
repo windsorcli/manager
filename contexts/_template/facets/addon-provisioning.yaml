@@ -56,8 +56,8 @@ terraform:
       secret_key: ${hetzner.object_storage.secret_key ?? env("HETZNER_S3_SECRET_KEY")}
       location: "${hetzner.object_storage.location ?? 'fsn1'}"
       # Rebuildable cache — force_destroy stays on. Harbor's own bucket
-      # (addon-harbor.yaml) is a separate stack invocation with its own setting; see
-      # ADR-0008 decision 4 for why the two don't share a bucket or a destroy policy.
+      # (addon-registry.yaml) is a separate stack invocation with its own setting,
+      # not shared with this one.
       buckets:
         - "${object_store.prefix}-image-factory"
 
@@ -273,11 +273,14 @@ flux:
   #     that point — the Deployment, the Secret, the ServiceMonitor — is ordinary Manager
   #     automation; only the key itself is unautomatable.
   #
+  # Omni's own install has no identity-resources dependency: keycloak_saml_url is a
+  # plain computed string (identity_effective.backchannel_issuer), not a live call, so
+  # the chart boots fine before the realm exists — SAML login just isn't functional
+  # yet. Only the saml-client Job actually calls the realm's admin API, so only its
+  # own resources variant below waits on identity-resources.
   - name: omni
     when: provisioning.enabled == true && identity.enabled != false
     path: provisioning
-    dependsOn:
-      - identity-resources
     secrets:
       omni-etcd-encryption-key:
         data:
@@ -291,7 +294,6 @@ flux:
     install:
       components:
         - omni
-        - omni/saml-client
         - "${(telemetry.metrics.enabled ?? false) == true ? 'omni/prometheus' : ''}"
         - "${lb_effective.mode == 'nodeport' ? 'omni/nodeport' : ''}"
         - "${lb_effective.mode != 'nodeport' && gateway.driver != 'cilium' ? 'omni/loadbalancer' : ''}"
@@ -320,17 +322,7 @@ flux:
         # The chart fetches this itself, server-side, so the internal (backchannel)
         # descriptor URL avoids depending on the gateway route being reachable.
         keycloak_saml_url: "${identity_effective.backchannel_issuer}/protocol/saml/descriptor"
-        keycloak_realm: "${identity_effective.realm}"
-        keycloak_admin_secret: "${(identity_effective.admin_password ?? '') != '' ? 'keycloak-bootstrap-admin' : 'keycloak-initial-admin'}"
-        # crewjam/saml (Omni's SAML library) has no configured EntityID, so it
-        # falls back to its own metadata URL as the issuer — not the bare root
-        # URL — per samlsp.DefaultServiceProvider (samlsp/new.go): metadataURL :=
-        # opts.URL.ResolveReference(&url.URL{Path: "saml/metadata"}).
-        omni_saml_entity_id: "https://${omni_effective.hostname}${omni_effective.external_port_suffix}/saml/metadata"
-        omni_saml_acs_url: "https://${omni_effective.hostname}${omni_effective.external_port_suffix}/saml/acs"
-      # Longer than the image-count default: the co-scheduled saml-client Job and Omni
-      # itself both block on Keycloak's cold-start-to-Ready, which can run to ~20m under load.
-      timeout: 30m
+      timeout: 10m
       interval: 5m
     resources:
       - dependsOn:
@@ -349,6 +341,29 @@ flux:
           loadbalancer_start_ip: "${network.loadbalancer_ips.start}"
           omni_wireguard_node_port: "${omni_effective.wireguard_node_port}"
         timeout: 10m
+        interval: 5m
+
+      # SAML client registration. A named resources variant, not a component of the
+      # install tier above, so it depends on identity without gating Omni's own
+      # install — the same shape addon-registry.yaml uses for Harbor's own OIDC.
+      - name: saml-client
+        dependsOn:
+          - omni-install
+          - identity-resources
+        components:
+          - omni/saml-client
+        substitutions:
+          keycloak_realm: "${identity_effective.realm}"
+          keycloak_admin_secret: "${(identity_effective.admin_password ?? '') != '' ? 'keycloak-bootstrap-admin' : 'keycloak-initial-admin'}"
+          # crewjam/saml (Omni's SAML library) has no configured EntityID, so it
+          # falls back to its own metadata URL as the issuer — not the bare root
+          # URL — per samlsp.DefaultServiceProvider (samlsp/new.go): metadataURL :=
+          # opts.URL.ResolveReference(&url.URL{Path: "saml/metadata"}).
+          omni_saml_entity_id: "https://${omni_effective.hostname}${omni_effective.external_port_suffix}/saml/metadata"
+          omni_saml_acs_url: "https://${omni_effective.hostname}${omni_effective.external_port_suffix}/saml/acs"
+        # Keycloak's cold-start-to-Ready can run to ~20m under load; this Job alone
+        # absorbs that now, not Omni's own install.
+        timeout: 25m
         interval: 5m
 
   # Both contribute into config-observability.yaml's manager-observability

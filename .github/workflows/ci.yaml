@@ -138,8 +138,8 @@ jobs:
     name: Integration (${{ matrix.scenario.name }})
     runs-on: ubuntu-latest
     timeout-minutes: ${{ matrix.scenario.job_timeout }}
-    # Job-level block replaces the workflow-level one outright rather than merging —
-    # issues: write is only needed here, to post the Claude diagnosis comment below.
+    # issues: write posts the diagnosis comment below; this block replaces (not merges
+    # with) the workflow-level permissions.
     permissions:
       contents: read
       issues: write
@@ -195,21 +195,23 @@ jobs:
       # add-ons' routes publish under; see addon-provisioning.yaml / addon-registry.yaml for
       # what each scenario's --set fans on.
       #
-      # The runner's 4 vCPUs host the entire single-node Talos container; a cgroup quota at
-      # the runner's core count throttles every pod at once, and provisioning's own
-      # Image Factory + Omni + Keycloak stack has no headroom left at Core's cluster.controlplanes.cpu
-      # default of 4. Memory is pinned alongside it to keep the container spec deterministic.
-      # gitops.concurrency defaults to at least 4 regardless of how small the CPU quota is
-      # (max(4, min(...)) in option-workstation.yaml), which floods etcd/apiserver on a
-      # 3-vCPU quota — pinned down to 2, the same values core's own CI uses for the identical
-      # single-node-runner constraint.
+      # No cluster.controlplanes.cpu/gitops.concurrency pin here, unlike core's own CI: capping
+      # the container below the runner's real core count throttles the whole cluster's
+      # convergence speed, not just pod scheduling admission, and windsor's "placing secrets"
+      # wait is a hardcoded 10-minute timeout with no override — a throttled chain that's
+      # already close to that wall tips over it. Left at Core's default (the runner's full
+      # core count) instead.
+      #
+      # observability.enabled=false trims a real dev-mode default this suite doesn't verify:
+      # neither scenario's own checks touch Grafana, and turning it off also drops the
+      # keycloak/realm/clients/grafana patch from identity-resources itself (the one
+      # Kustomization provisioning's omni-resources-saml-client waits on), shortening that
+      # specific wait rather than just freeing CPU elsewhere.
       - name: Windsor Init
         run: |
           windsor init local --reset \
             --set dns.domain=test \
-            --set cluster.controlplanes.cpu=3 \
-            --set cluster.controlplanes.memory=8 \
-            --set gitops.concurrency=2 \
+            --set observability.enabled=false \
             ${{ matrix.scenario.sets }}
 
       - name: Show blueprint
