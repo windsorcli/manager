@@ -137,6 +137,10 @@ properties:
       omni:
         type: object
         properties:
+          enabled:
+            type: boolean
+            default: false
+            description: Enable Sidero Omni on its own, without the image factory. provisioning.enabled turns both on together.
           hostname:
             type: string
             description: Base hostname Omni's UI/API advertises. Derived as omni.<domain> when unset; the Kubernetes proxy and SideroLink machine API endpoints are derived from this same base (kubernetes.<hostname>, siderolink.<hostname>).
@@ -166,7 +170,7 @@ properties:
           etcd_encryption_key:
             type: string
             sensitive: true
-            description: ASCII-armored GPG private key Omni uses to decrypt its etcd master key (config.storage.default.etcd.privateKeySource). Generate with `(export GNUPGHOME=$(mktemp -d); gpg --batch --passphrase '' --quick-gen-key x; gpg -a --export-secret-key > omni.asc; rm -rf $GNUPGHOME)`. Set via a secret() reference. Required outside dev mode; dev mode falls back to a fixed key checked into the facet.
+            description: ASCII-armored GPG private key Omni uses to decrypt its etcd master key (config.storage.default.etcd.privateKeySource). Generate with `(export GNUPGHOME=$(mktemp -d); gpg --batch --passphrase '' --quick-gen-key x; gpg -a --export-secret-key > omni.asc; rm -rf $GNUPGHOME)`. Set via a secret() reference. Required outside dev mode; dev mode falls back to a fixed key stored in the facet.
           initial_admins:
             type: array
             items:
@@ -182,9 +186,7 @@ properties:
 
   # Fleet container registry. Capability-plus-driver, the same shape Core's own
   # identity.driver/database.postgres.driver use — one driver today, room for another
-  # without a breaking schema change later. See ADR-0008 for why Harbor rather than a
-  # second bare distribution cache, and for the two-phase plan this schema only
-  # carries Phase 1 of: local admin auth, no OIDC/proxy-cache/GC config yet.
+  # without a breaking schema change later.
   registry:
     type: object
     properties:
@@ -208,7 +210,7 @@ properties:
           admin_password:
             type: string
             sensitive: true
-            description: Initial password for Harbor's local admin account (the only auth method in Phase 1 — see ADR-0008). Set via a secret() reference. Required outside dev mode; dev mode falls back to a fixed password checked into the facet.
+            description: Initial password for Harbor's local admin account, used as a fallback sign-in when SSO isn't configured. Set via a secret() reference. Required outside dev mode; dev mode falls back to a fixed password stored in the facet.
           registry_size:
             type: string
             default: 20Gi
