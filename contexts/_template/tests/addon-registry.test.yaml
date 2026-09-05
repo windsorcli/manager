@@ -1,8 +1,7 @@
 # addon-registry.yaml facet tests
 # Covers the enabled/disabled gate, the required admin password and gateway, the
-# database fan-on, storage landing on a PVC vs an object-store bucket, and the
-# terraform bucket provisioning on hetzner/aws — see ADR-0008 for the Phase 1 scope
-# this facet implements (local admin auth, no OIDC/proxy-cache/GC yet).
+# database fan-on, storage landing on a PVC vs an object-store bucket, the terraform
+# bucket provisioning on hetzner/aws, and the SSO wiring.
 
 x-defaults:
   network: &default-network
@@ -67,6 +66,144 @@ cases:
         database:
           postgres:
             enabled: true
+
+  # SSO rides on identity: enabling it adds a named oidc resources variant. Harbor's own
+  # install keeps its dependencies free of identity so its route comes up regardless.
+  - name: wires harbor sso when identity is enabled
+    values:
+      dev: true
+      platform: metal
+      network: *default-network
+      cluster: *default-cluster
+      gateway: *default-gateway
+      identity:
+        enabled: true
+      registry:
+        enabled: true
+    expect:
+      flux:
+        - name: registry
+          dependsOn:
+            - pki-install
+            - database-install
+            - gateway-install
+          install:
+            components:
+              - database
+              - harbor
+          resources:
+            - components:
+                - harbor/gateway
+            - name: oidc
+              dependsOn:
+                - registry-install
+                - identity-resources
+              components:
+                - harbor/oidc
+              substitutions:
+                keycloak_realm: platform
+                oidc_admin_group: platform-admins
+
+  # Outside dev, with no bootstrap admin password supplied, identity falls back to
+  # Core's own operator-generated keycloak-initial-admin secret, and cert
+  # verification stays on — the opposite branch from the dev-mode case above.
+  - name: wires harbor sso outside dev with cert verification on
+    values:
+      platform: metal
+      network: *default-network
+      cluster: *default-cluster
+      gateway: *default-gateway
+      identity:
+        enabled: true
+      registry:
+        enabled: true
+        harbor:
+          admin_password: supplied-by-operator
+    expect:
+      flux:
+        - name: registry
+          resources:
+            - components:
+                - harbor/gateway
+            - name: oidc
+              components:
+                - harbor/oidc
+              substitutions:
+                keycloak_admin_secret: keycloak-initial-admin
+                oidc_verify_cert: "true"
+
+  # identity present but SSO explicitly opted out keeps Harbor on local-admin auth — no
+  # oidc resources variant at all.
+  - name: leaves harbor sso out when opted out
+    values:
+      dev: true
+      platform: metal
+      network: *default-network
+      cluster: *default-cluster
+      gateway: *default-gateway
+      identity:
+        enabled: true
+      registry:
+        enabled: true
+        harbor:
+          sso: false
+    expect:
+      flux:
+        - name: registry
+          install:
+            components:
+              - database
+              - harbor
+          resources:
+            - components:
+                - harbor/gateway
+    exclude:
+      flux:
+        - name: registry
+          resources:
+            - components:
+                - harbor/oidc
+
+  # An external OIDC issuer hosts nothing to register against and creates no
+  # identity-resources — the oidc variant has to stay off, not dangle a dependsOn
+  # on a Kustomization that will never exist.
+  - name: leaves harbor sso out when identity is an external oidc issuer
+    values:
+      dev: true
+      platform: metal
+      network: *default-network
+      cluster: *default-cluster
+      gateway: *default-gateway
+      identity:
+        enabled: true
+        driver: oidc
+        oidc:
+          issuer: https://sso.corp/realms/platform
+      observability:
+        enabled: false
+      registry:
+        enabled: true
+    expect:
+      flux:
+        - name: registry
+          install:
+            components:
+              - database
+              - harbor
+          resources:
+            - components:
+                - harbor/gateway
+    exclude:
+      flux:
+        - name: registry
+          resources:
+            - components:
+                - harbor/oidc
+
+  # NOTE: no test for identity.enabled + gateway.enabled: false here yet — Core's
+  # keycloak/gateway route (unrelated to this facet) still dangles a dependsOn on
+  # gateway-resources against the currently-published core:latest, independent of
+  # Harbor entirely. Add once windsorcli/core#2675 merges and republishes.
 
   # driver defaults to harbor, so leaving it unset still resolves.
   - name: defaults the driver to harbor
@@ -246,8 +383,9 @@ cases:
         enabled: true
     expectError: true
 
-  # Harbor's UI/API need the shared gateway.
-  - name: fails without the gateway enabled
+  # No gateway needed to install — Harbor still comes up (port-forward the harbor
+  # Service to reach it), just without the HTTPRoute resources variant.
+  - name: installs without a route when no gateway is enabled
     values:
       platform: metal
       network: *default-network
@@ -258,7 +396,23 @@ cases:
         enabled: true
         harbor:
           admin_password: supplied-by-operator
-    expectError: true
+    expect:
+      flux:
+        - name: registry
+          dependsOn:
+            - pki-install
+            - database-install
+          install:
+            components:
+              - database
+              - harbor
+          resources: []
+    exclude:
+      flux:
+        - name: registry
+          resources:
+            - components:
+                - harbor/gateway
 
   # Off by default.
   - name: excludes harbor when the addon is disabled

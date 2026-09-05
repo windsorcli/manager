@@ -646,7 +646,7 @@ cases:
             substitutions:
               # Core's own dev admin (keycloak/realm/dev-user), so a SAML login
               # with that identity is recognized immediately.
-              omni_initial_admins: "[admin@local.test]"
+              omni_initial_admins: "[dev-admin@local.test]"
 
   # A cloud-managed LoadBalancer controller's external IP is unknowable before the
   # Service exists (aws here; hetzner/azure are the same shape), so outside dev mode

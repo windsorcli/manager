@@ -1,0 +1,173 @@
+# config-cluster-sizing.yaml facet tests
+# Covers the docker-desktop CPU quota bump: the per-addon sizing formula and the
+# docker-desktop guard.
+
+x-defaults:
+  network: &default-network
+    cidr_block: 10.5.0.0/16
+    loadbalancer_driver: kube-vip
+    loadbalancer_mode: arp
+    loadbalancer_ips:
+      start: "10.5.1.10"
+      end: "10.5.1.100"
+
+  cluster: &default-cluster
+    driver: talos
+    controlplanes:
+      nodes:
+        controlplane-1:
+          endpoint: 10.5.0.10:50000
+          node: 10.5.0.10
+          hostname: controlplane-1
+    workers:
+      volumes:
+        - /var/mnt/local
+
+  terraformOutputs: &docker-outputs
+    compute:
+      controlplanes:
+        - endpoint: 10.5.0.10:6443
+          node: 10.5.0.10
+          hostname: controlplane-1
+      workers: []
+    workstation: {}
+
+cases:
+  # provisioning + registry together: base 5 plus one core each.
+  - name: sizes cpu for the full fleet on docker-desktop
+    values:
+      dev: true
+      platform: docker
+      network: *default-network
+      cluster: *default-cluster
+      workstation:
+        runtime: docker-desktop
+      identity:
+        enabled: true
+      provisioning:
+        enabled: true
+      registry:
+        enabled: true
+    terraformOutputs: *docker-outputs
+    expect:
+      config:
+        cluster:
+          controlplanes:
+            cpu: 7
+
+  # One addon lands at base 5 plus a single core.
+  - name: sizes cpu for registry alone on docker-desktop
+    values:
+      dev: true
+      platform: docker
+      network: *default-network
+      cluster: *default-cluster
+      workstation:
+        runtime: docker-desktop
+      registry:
+        enabled: true
+    terraformOutputs: *docker-outputs
+    expect:
+      config:
+        cluster:
+          controlplanes:
+            cpu: 6
+
+  - name: sizes cpu for provisioning alone on docker-desktop
+    values:
+      dev: true
+      platform: docker
+      network: *default-network
+      cluster: *default-cluster
+      workstation:
+        runtime: docker-desktop
+      identity:
+        enabled: true
+      provisioning:
+        enabled: true
+    terraformOutputs: *docker-outputs
+    expect:
+      config:
+        cluster:
+          controlplanes:
+            cpu: 6
+
+  # Neither addon enabled: the facet stays inert and Core's own default holds.
+  - name: leaves the cpu quota alone with neither addon enabled
+    values:
+      dev: true
+      platform: docker
+      network: *default-network
+      cluster: *default-cluster
+      workstation:
+        runtime: docker-desktop
+      identity:
+        enabled: true
+    terraformOutputs: *docker-outputs
+    expect:
+      config:
+        cluster:
+          controlplanes:
+            cpu: 4
+
+  # An operator's explicit quota wins over the computed bump.
+  - name: an explicit cpu quota is not overridden
+    values:
+      dev: true
+      platform: docker
+      network: *default-network
+      cluster:
+        driver: talos
+        controlplanes:
+          cpu: 3
+          nodes:
+            controlplane-1:
+              endpoint: 10.5.0.10:50000
+              node: 10.5.0.10
+              hostname: controlplane-1
+        workers:
+          volumes:
+            - /var/mnt/local
+      workstation:
+        runtime: docker-desktop
+      provisioning:
+        enabled: true
+      registry:
+        enabled: true
+    terraformOutputs: *docker-outputs
+    expect:
+      config:
+        cluster:
+          controlplanes:
+            cpu: 3
+
+  # A worker pool runs the workloads, so the control-plane quota is left at Core's default.
+  - name: leaves the control-plane quota alone when a worker pool exists
+    values:
+      dev: true
+      platform: docker
+      network: *default-network
+      cluster:
+        driver: talos
+        controlplanes:
+          nodes:
+            controlplane-1:
+              endpoint: 10.5.0.10:50000
+              node: 10.5.0.10
+              hostname: controlplane-1
+        workers:
+          count: 1
+          volumes:
+            - /var/mnt/local
+      workstation:
+        runtime: docker-desktop
+      provisioning:
+        enabled: true
+      registry:
+        enabled: true
+    terraformOutputs: *docker-outputs
+    expect:
+      config:
+        cluster:
+          controlplanes:
+            cpu: 4

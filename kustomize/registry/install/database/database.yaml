@@ -2,7 +2,7 @@
 # CloudNativePG cluster backing Harbor. initdb creates the `harbor` database owned by
 # role `harbor`; CNPG publishes credentials in the `harbor-db-app` secret and a
 # read-write service `harbor-db-rw`, both consumed by the HelmRelease's `database.external`
-# values (ADR-0008 decision 2). Single instance — Harbor's own Postgres has no
+# values. Single instance — Harbor's own Postgres has no
 # multi-writer story either way, so there's no topology: ha overlay for this Cluster the
 # way keycloak-db has one.
 apiVersion: postgresql.cnpg.io/v1

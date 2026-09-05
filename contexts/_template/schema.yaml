@@ -215,6 +215,10 @@ properties:
             type: string
             default: 20Gi
             description: Size of the volume backing the in-cluster registry, where no object storage exists. Holds pushed images and charts.
+          sso:
+            type: boolean
+            default: true
+            description: Sign in to Harbor via Core's identity (SSO). Active when identity is enabled; set false to keep Harbor on local-admin auth.
         additionalProperties: false
     additionalProperties: false
     description: Self-hosted fleet container registry

@@ -25,28 +25,46 @@ substitutions:
   external_domain:
     required_when: "always"
     description: "Domain the gateway route publishes under; the hostname is `harbor.<external_domain>`. Public domain when set, otherwise the private domain or the cluster domain."
+  keycloak_realm:
+    required_when: "`harbor/oidc`"
+    description: "Identity realm the OIDC client registers against, from `identity_effective.realm`."
+  oidc_issuer:
+    required_when: "`harbor/oidc`"
+    description: "External OIDC discovery issuer, from `identity_effective.issuer`."
+  oidc_admin_group:
+    required_when: "`harbor/oidc`"
+    description: "Keycloak group mapped to Harbor's admin role via the OIDC groups claim. Fixed at `platform-admins`."
+  oidc_verify_cert:
+    required_when: "`harbor/oidc`"
+    description: "Whether Harbor verifies the identity provider's TLS certificate. False only in dev mode."
 
 components:
   database:
     enable_when: "always"
-    description: "Dedicated CloudNativePG `Cluster` (`harbor-db`) — Harbor's Postgres, not the chart's bundled one. See ADR-0008 decision 2."
+    description: "Dedicated CloudNativePG `Cluster` (`harbor-db`) — Harbor's Postgres, not the chart's bundled one."
   harbor:
     enable_when: "always"
-    description: "Helm release of the official `goharbor/harbor-helm` chart in `harbor`. Local admin auth only in Phase 1 — see ADR-0008."
+    description: "Helm release of the official `goharbor/harbor-helm` chart in `harbor`. Local admin auth."
   harbor/s3:
     enable_when: "`object_store.driver` is `hetzner` or `aws`"
-    description: "Backs the registry with a bucket from the platform's object store instead of a PVC. Own bucket, own destroy policy — not shared with image-factory's. See ADR-0008 decision 4."
+    description: "Backs the registry with a bucket from the platform's object store instead of a PVC. Own bucket, own destroy policy — not shared with image-factory's."
+  harbor/oidc:
+    enable_when: "`identity.enabled == true` and `registry.harbor.sso` is not explicitly false"
+    description: "Admin-API Job that registers Harbor's OIDC client in the platform realm and configures Harbor for OIDC auth, group-mapped to `platform-admins`. A named `oidc` resources variant of the `registry` flux system (`registry-resources-oidc`) so it depends on identity without gating Harbor's install or gateway route."
   harbor/gateway:
-    enable_when: "always"
-    description: "HTTPRoute on Core's canonical `external` Gateway. Lives in the resources tier and depends on `gateway-resources`."
+    enable_when: "`gateway.enabled == true`"
+    description: "HTTPRoute on Core's canonical `external` Gateway. Lives in the resources tier and depends on `gateway-resources`. Without a gateway, reach Harbor by port-forwarding the `harbor` Service in `registry`."
 
 dependencies:
   pki:
     required_when: "always"
     reason: "Harbor is served over TLS, and the certificate is issued by the cluster issuer cert-manager installs."
   gateway:
-    required_when: "always"
+    required_when: "`gateway.enabled == true`"
     reason: "The route CRDs have to exist before the chart renders an HTTPRoute."
   database:
     required_when: "always"
     reason: "The CloudNativePG operator has to exist before this facet's own `harbor-db` Cluster can reconcile."
+  identity:
+    required_when: "`harbor/oidc`"
+    reason: "The OIDC client registers against the platform realm's admin API."

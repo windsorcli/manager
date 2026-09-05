@@ -21,9 +21,7 @@ spec:
           name: harbor
           port: 80
       # OCI blob pushes are large, chunked PATCH/PUT requests — same long timeouts
-      # image-factory's own route sets. See ADR-0008 decision 5: whether Envoy/Cilium
-      # need an additional body-size policy beyond this is an open spike, not
-      # resolved here.
+      # image-factory's own route sets.
       timeouts:
         request: 5m
         backendRequest: 5m

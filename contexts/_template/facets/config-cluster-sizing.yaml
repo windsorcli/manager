@@ -1,0 +1,18 @@
+kind: Facet
+apiVersion: blueprints.windsorcli.dev/v1alpha1
+metadata:
+  name: cluster-sizing
+  description: Sizes the workerless control-plane CPU quota to the enabled fleet
+
+# A workerless single node runs the whole fleet, so Core's 4-CPU default starves the
+# provisioning/registry pods. Raise the control-plane quota on docker-desktop.
+when: >-
+  (workstation.runtime ?? '') == 'docker-desktop'
+  && cluster_nodes_effective.workers == 0
+  && ((provisioning.enabled ?? false) == true || (registry.enabled ?? false) == true)
+
+config:
+  - name: cluster
+    value:
+      controlplanes:
+        cpu: "${5 + ((provisioning.enabled ?? false) == true ? 1 : 0) + ((registry.enabled ?? false) == true ? 1 : 0)}"

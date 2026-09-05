@@ -10,9 +10,8 @@ metadata:
 # driver: hetzner and aws provision buckets in the platform's own object storage; minio
 # uses Core's in-cluster operator, which installs no Tenant, so its endpoint stays an
 # operator input; none means no bucket-backed storage is available. Each consumer
-# (addon-provisioning.yaml's image_factory, addon-harbor.yaml) provisions its own bucket
-# against this shared driver/endpoint/region/prefix — see ADR-0008 for why the buckets
-# themselves stay separate.
+# (addon-provisioning.yaml's image_factory, addon-registry.yaml's harbor) provisions its
+# own bucket against this shared driver/endpoint/region/prefix, not a shared one.
 config:
 
   - name: object_store
