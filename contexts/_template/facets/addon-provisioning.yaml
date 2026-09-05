@@ -9,24 +9,24 @@ metadata:
 # is the coarse OR-gate; every terraform/config/flux entry below carries its own precise
 # when: for which of the two it belongs to. Same shape as Core's telemetry facet, whose
 # top-level when: is metrics.enabled || logs.enabled with per-component ternaries beneath.
-when: provisioning.enabled == true || provisioning.image_factory.enabled == true
+when: provisioning.enabled == true || provisioning.image_factory.enabled == true || provisioning.omni.enabled == true
 
 requires:
   # Omni only — image_factory has no requirements of its own beyond
   # config-object-store.yaml's shared object_store checks.
-  - when: provisioning.enabled == true && identity.enabled != false
+  - when: (provisioning.enabled == true || provisioning.omni.enabled == true) && identity.enabled != false
     paths:
       - gateway.enabled
     message: Omni's UI/API, Kubernetes proxy, and SideroLink machine API are reached over HTTPS through the cluster gateway — enable the gateway.
-  - when: provisioning.enabled == true && identity.enabled != false && dev != true
+  - when: (provisioning.enabled == true || provisioning.omni.enabled == true) && identity.enabled != false && dev != true
     paths:
       - provisioning.omni.etcd_encryption_key
     message: Omni needs a GPG-armored private key to decrypt its etcd master key. Generate one with `(export GNUPGHOME=$(mktemp -d); gpg --batch --passphrase '' --quick-gen-key x; gpg -a --export-secret-key > omni.asc; rm -rf $GNUPGHOME)` and set provisioning.omni.etcd_encryption_key via a secret() reference.
-  - when: provisioning.enabled == true && identity.enabled != false && (omni_effective.wireguard_advertised_endpoint ?? '') == ''
+  - when: (provisioning.enabled == true || provisioning.omni.enabled == true) && identity.enabled != false && (omni_effective.wireguard_advertised_endpoint ?? '') == ''
     paths:
       - provisioning.omni.wireguard.advertised_endpoint
     message: SideroLink's gateway LoadBalancer IP isn't known ahead of a cloud-managed LB controller provisioning it (aws, hetzner, azure). Apply once, then set provisioning.omni.wireguard.advertised_endpoint to <load-balancer-ip>:30180 and apply again.
-  - when: provisioning.enabled == true && identity.enabled != false && dev != true
+  - when: (provisioning.enabled == true || provisioning.omni.enabled == true) && identity.enabled != false && dev != true
     paths:
       - provisioning.omni.initial_admins
     message: Omni requires at least one bootstrap admin email in config.auth.initialUsers before it will start. Set provisioning.omni.initial_admins to a list of operator emails — real access should route through Keycloak SAML group membership once it's set up.
@@ -46,7 +46,7 @@ terraform:
 
   - name: omni-account
     path: ids/omni-account
-    when: provisioning.enabled == true && identity.enabled != false && (provisioning.omni.account_id ?? '') == ''
+    when: (provisioning.enabled == true || provisioning.omni.enabled == true) && identity.enabled != false && (provisioning.omni.account_id ?? '') == ''
 
   - name: image-factory-object-store
     path: object-store/hetzner
@@ -70,15 +70,13 @@ terraform:
         - "${object_store.prefix}-image-factory"
 
 config:
-  # provisioning.enabled == true fans on the capabilities Omni depends on: Core's
-  # identity (Keycloak, and through it the database the server needs) and the image
-  # factory Omni provisions Talos machines from. Both schema-default to enabled: false,
-  # so a guard here would always read that default back as false — set true
-  # unconditionally instead; an operator's own explicit false in values.yaml still wins,
-  # since the composer merges raw operator values over facet-computed config last each
-  # round.
+  # provisioning.enabled turns on identity and the image factory too.
+  # provisioning.omni.enabled turns on just identity and Omni.
+  # All three default to false. A guard here would read that default back as false, so
+  # this sets true unconditionally instead. An operator's explicit false still wins:
+  # raw operator values merge over facet-computed config last.
   - name: identity
-    when: provisioning.enabled == true
+    when: provisioning.enabled == true || provisioning.omni.enabled == true
     value:
       enabled: true
 
@@ -86,6 +84,8 @@ config:
     when: provisioning.enabled == true
     value:
       image_factory:
+        enabled: true
+      omni:
         enabled: true
 
   # Bare hostnames (no port) for gateway HTTPRoute matching — sibling single-level
@@ -140,7 +140,7 @@ config:
   # NodePort needs a matching hostport (same-port passthrough). An operator's own
   # hostports list still wins (raw values merge over facet-computed config last).
   - name: cluster
-    when: provisioning.enabled == true && identity.enabled != false && workstation.runtime == 'docker-desktop'
+    when: (provisioning.enabled == true || provisioning.omni.enabled == true) && identity.enabled != false && workstation.runtime == 'docker-desktop'
     value:
       controlplanes:
         hostports: >-
@@ -279,7 +279,7 @@ flux:
   # yet. Only the saml-client Job actually calls the realm's admin API, so only its
   # own resources variant below waits on identity-resources.
   - name: omni
-    when: provisioning.enabled == true && identity.enabled != false
+    when: (provisioning.enabled == true || provisioning.omni.enabled == true) && identity.enabled != false
     path: provisioning
     secrets:
       omni-etcd-encryption-key:
@@ -381,7 +381,7 @@ flux:
   # Neither needs omni/exporter: both work from Omni's native metrics alone, which
   # telemetry.metrics.enabled already scrapes.
   - name: manager-observability
-    when: provisioning.enabled == true && identity.enabled != false && (telemetry.metrics.enabled ?? false) == true
+    when: (provisioning.enabled == true || provisioning.omni.enabled == true) && identity.enabled != false && (telemetry.metrics.enabled ?? false) == true
     resources:
       - components:
           - prometheus/alerts/omni
