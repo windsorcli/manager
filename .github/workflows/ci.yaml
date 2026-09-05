@@ -189,10 +189,24 @@ jobs:
       # Core cluster and assert nothing about what this repo adds. dns.domain matches what the
       # add-ons' routes publish under; see addon-provisioning.yaml / addon-registry.yaml for
       # what each scenario's --set fans on.
+      #
+      # No cluster.controlplanes.cpu/gitops.concurrency pin here, unlike core's own CI: capping
+      # the container below the runner's real core count throttles the whole cluster's
+      # convergence speed, not just pod scheduling admission, and windsor's "placing secrets"
+      # wait is a hardcoded 10-minute timeout with no override — a throttled chain that's
+      # already close to that wall tips over it. Left at Core's default (the runner's full
+      # core count) instead.
+      #
+      # --blueprint pins core to the digest in contexts/_template/blueprint.yaml. A project
+      # with its own contexts/_template/ ignores that file's sources: entry for its own
+      # windsor init, so this reads the digest out and passes it explicitly instead.
       - name: Windsor Init
         run: |
+          CORE_URL=$(grep -oE 'oci://ghcr\.io/windsorcli/core@sha256:[a-f0-9]+' contexts/_template/blueprint.yaml)
+          test -n "$CORE_URL" || { echo "ERROR: could not parse core digest from blueprint.yaml" >&2; exit 1; }
           windsor init local --reset \
             --set dns.domain=test \
+            --blueprint "$CORE_URL" \
             ${{ matrix.scenario.sets }}
 
       - name: Show blueprint

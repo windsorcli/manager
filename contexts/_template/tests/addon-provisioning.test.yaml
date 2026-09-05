@@ -386,19 +386,16 @@ cases:
           path: ids/omni-account
       flux:
         - name: omni
-          dependsOn:
-            - identity-resources
           install:
             components:
               - omni
-              - omni/saml-client
             substitutions:
               omni_hostname: omni.cluster.local
               omni_kube_proxy_hostname: omni-kube.cluster.local
               omni_machine_api_hostname: omni-siderolink.cluster.local
               omni_persistence_size: 16Gi
               omni_image_factory_url: https://factory.talos.dev
-            timeout: 30m
+            timeout: 10m
             interval: 5m
           resources:
             - dependsOn:
@@ -407,6 +404,13 @@ cases:
                 - omni/gateway
               substitutions:
                 external_domain: cluster.local
+            - name: saml-client
+              dependsOn:
+                - omni-install
+                - identity-resources
+              components:
+                - omni/saml-client
+              timeout: 25m
 
   # An operator's explicit external_url always wins over the in-cluster default —
   # e.g. a factory that isn't running in this cluster at all.
@@ -513,7 +517,6 @@ cases:
           install:
             components:
               - omni
-              - omni/saml-client
               - omni/prometheus
           resources:
             - components:
@@ -547,7 +550,6 @@ cases:
           install:
             components:
               - omni
-              - omni/saml-client
 
   # Both telemetry.metrics.enabled and provisioning.omni.service_account_key add the
   # exporter.
@@ -574,7 +576,6 @@ cases:
           install:
             components:
               - omni
-              - omni/saml-client
               - omni/prometheus
               - omni/exporter
 
@@ -641,7 +642,6 @@ cases:
           install:
             components:
               - omni
-              - omni/saml-client
             substitutions:
               # Core's own dev admin (keycloak/realm/dev-user), so a SAML login
               # with that identity is recognized immediately.
@@ -649,8 +649,8 @@ cases:
 
   # A cloud-managed LoadBalancer controller's external IP is unknowable before the
   # Service exists (aws here; hetzner/azure are the same shape), so outside dev mode
-  # this is a genuine two-phase "apply once, then set the real IP" operator step (see
-  # the earlier explicit-override test). Under dev == true a placeholder fills in
+  # an operator applies once, then sets the real IP (see the earlier explicit-override
+  # test). Under dev == true a placeholder fills in
   # instead — colima, CI, and any other dev context converge without it, since
   # nothing dev mode drives ever reads the value back. Local/on-prem LB platforms
   # (the next test) don't need this at all — their address derives statically.
@@ -712,9 +712,8 @@ cases:
                 - omni/gateway/wireguard
 
   # envoy driver keeps the chart's own dedicated LoadBalancer Service — gateway-routed
-  # wireguard is cilium-only for now (docs/adr/0005). The Service's own IP is
-  # unknowable ahead of an apply, same as ADR-0004's original design, so dev mode's
-  # placeholder covers it.
+  # wireguard is cilium-only for now. The Service's own IP is unknowable ahead of an
+  # apply, so dev mode's placeholder covers it.
   - name: keeps the dedicated LoadBalancer Service on the envoy driver
     values:
       dev: true
@@ -735,7 +734,6 @@ cases:
           install:
             components:
               - omni
-              - omni/saml-client
               - omni/loadbalancer
             substitutions:
               omni_wireguard_advertised_endpoint: "0.0.0.0:30180"
@@ -777,7 +775,6 @@ cases:
           install:
             components:
               - omni
-              - omni/saml-client
               - omni/nodeport
             substitutions:
               omni_wireguard_advertised_endpoint: 10.5.0.10:30180
