@@ -130,10 +130,12 @@ jobs:
   # Integration
   # ===========================================================================
   # Brings the composed blueprint up on a local Talos cluster in Docker and tears it down.
-  # Manager layers on core:latest, so this is also the only check that the published Core
-  # artifact and these facets still compose. Split across a matrix so each heavy stack gets
-  # its own runner: `provisioning` (image factory + omni + Keycloak) and `registry` (Harbor
-  # plus its CNPG database) never contend for one machine.
+  # Manager layers on core:latest, so this also checks that Core's artifact and these
+  # facets still compose.
+  #
+  # Core's own CI already covers pki, gateway, dns.private, observability, and database.
+  # This job only proves what Manager adds. Each add-on runs as its own matrix track, so
+  # no runner carries more than one heavy workload at a time.
   integration:
     name: Integration (${{ matrix.scenario.name }})
     runs-on: ubuntu-latest
@@ -142,12 +144,16 @@ jobs:
       fail-fast: false
       matrix:
         scenario:
-          # up_timeout carries Keycloak's cold-start (see addon-provisioning); registry is
-          # lighter but Harbor's chart and CNPG still need room.
-          - name: provisioning
-            sets: --set provisioning.enabled=true
-            up_timeout: 35
-            job_timeout: 55
+          # up_timeout: identity-omni needs room for Keycloak's cold start. registry
+          # needs room for Harbor and CNPG. image-factory is the lightest track.
+          - name: image-factory
+            sets: --set provisioning.image_factory.enabled=true
+            up_timeout: 15
+            job_timeout: 30
+          - name: identity-omni
+            sets: --set identity.enabled=true --set provisioning.omni.enabled=true
+            up_timeout: 30
+            job_timeout: 45
           - name: registry
             sets: --set registry.enabled=true
             up_timeout: 25
@@ -217,13 +223,31 @@ jobs:
         timeout-minutes: ${{ matrix.scenario.up_timeout }}
         run: windsor up --verbose --wait
 
+      # windsor up --wait proves the pod rolled out. It doesn't prove the gateway accepted
+      # the route. Same check as Harbor's below, against the image-factory route.
+      - name: Verify the image factory is reachable through the gateway
+        if: success() && matrix.scenario.name == 'image-factory'
+        run: |
+          for _ in $(seq 30); do
+            conds=$(kubectl -n provisioning get httproute image-factory \
+              -o jsonpath='{.status.parents[*].conditions[?(@.type=="Accepted")].status} {.status.parents[*].conditions[?(@.type=="ResolvedRefs")].status}' 2>/dev/null || true)
+            case "$conds" in
+              *False*|*Unknown*|" "|"") sleep 5 ;;
+              *True*) echo "image-factory route programmed: $conds"; exit 0 ;;
+              *) sleep 5 ;;
+            esac
+          done
+          echo "image-factory HTTPRoute not programmed by the gateway (Accepted/ResolvedRefs): '$conds'" >&2
+          kubectl -n provisioning get httproute image-factory -o yaml >&2 || true
+          exit 1
+
       # windsor up --wait already blocks on each Kustomization's Ready condition, which Flux
       # only reports once every resource it applies passes kstatus health — Deployments
       # rolled out, Jobs Complete. Re-checking rollout status here would just re-assert what
       # getting past --wait already proved. What --wait can't prove is that the saml-client
       # Job did the right thing rather than merely exiting 0, so check that explicitly.
       - name: Verify the omni SAML client registered
-        if: success() && matrix.scenario.name == 'provisioning'
+        if: success() && matrix.scenario.name == 'identity-omni'
         run: |
           kubectl -n provisioning wait --for=condition=complete job/keycloak-omni-saml-client --timeout=5m
           # The Job retries pods while Keycloak cold-starts; read every pod's logs, since
