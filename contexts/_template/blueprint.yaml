@@ -5,7 +5,9 @@ metadata:
   description: Management cluster blueprint layered on top of core
 sources:
   - name: core
-    url: oci://ghcr.io/windsorcli/core:latest
+    # Digest-pinned so the CLI and Flux resolve the same content.
+    # renovate: datasource=docker depName=windsorcli/core package=ghcr.io/windsorcli/core
+    url: oci://ghcr.io/windsorcli/core@sha256:ddd5178b2fc557380d8831457618fb2ca4b02085d330726f4837eddf461acaf8
     install: true
 terraform: []
 kustomize: []

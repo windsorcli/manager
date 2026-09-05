@@ -196,10 +196,16 @@ jobs:
       # wait is a hardcoded 10-minute timeout with no override — a throttled chain that's
       # already close to that wall tips over it. Left at Core's default (the runner's full
       # core count) instead.
+      #
+      # --blueprint pins core to the digest in contexts/_template/blueprint.yaml. A project
+      # with its own contexts/_template/ ignores that file's sources: entry for its own
+      # windsor init, so this reads the digest out and passes it explicitly instead.
       - name: Windsor Init
         run: |
+          CORE_URL=$(grep -oE 'oci://ghcr\.io/windsorcli/core@sha256:[a-f0-9]+' contexts/_template/blueprint.yaml)
           windsor init local --reset \
             --set dns.domain=test \
+            --blueprint "$CORE_URL" \
             ${{ matrix.scenario.sets }}
 
       - name: Show blueprint
