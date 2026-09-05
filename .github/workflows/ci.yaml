@@ -203,6 +203,7 @@ jobs:
       - name: Windsor Init
         run: |
           CORE_URL=$(grep -oE 'oci://ghcr\.io/windsorcli/core@sha256:[a-f0-9]+' contexts/_template/blueprint.yaml)
+          test -n "$CORE_URL" || { echo "ERROR: could not parse core digest from blueprint.yaml" >&2; exit 1; }
           windsor init local --reset \
             --set dns.domain=test \
             --blueprint "$CORE_URL" \
