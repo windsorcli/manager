@@ -1,8 +1,9 @@
 # addon-provisioning.yaml facet tests
-# Covers the image factory (independently, under provisioning.image_factory) and omni
-# (under provisioning.enabled, which also fans identity and the image factory on),
-# each conditional component, the storage the in-cluster registry lands on for every
-# object store the platform resolves to, and exclusion when each half is off.
+# Covers the image factory (independently, under provisioning.image_factory), omni
+# (independently, under provisioning.omni.enabled, or via provisioning.enabled, which
+# fans identity, the image factory, and omni all on together), each conditional
+# component, the storage the in-cluster registry lands on for every object store the
+# platform resolves to, and exclusion when each half is off.
 #
 # The registry components only appear when no external registry is named, so the cases
 # that exercise them leave provisioning.image_factory.registry unset.
@@ -882,11 +883,43 @@ cases:
     expectError: true
 
   # =============================================================================
-  # provisioning.enabled fan-out — identity and the image factory
+  # provisioning.omni.enabled — Omni on its own, without the image factory
   # =============================================================================
 
-  # The switch on its own brings up both dependencies, without the operator naming
-  # either: Core's identity system (server, platform realm) and its database, plus the
+  # Omni's own gate, independent of provisioning.enabled — still needs identity, which
+  # this forces on the same way provisioning.enabled does.
+  - name: turns on omni via provisioning.omni.enabled, without the image factory
+    values:
+      platform: metal
+      network: *default-network
+      cluster: *default-cluster
+      gateway: *default-gateway
+      dns:
+        private_domain: cluster.local
+      provisioning:
+        omni:
+          <<: *default-omni
+          enabled: true
+    expect:
+      flux:
+        - name: identity
+          install:
+            components:
+              - keycloak-operator
+        - name: omni
+          install:
+            components:
+              - omni
+    exclude:
+      flux:
+        - name: image-factory
+
+  # =============================================================================
+  # provisioning.enabled fan-out — identity, the image factory, and omni
+  # =============================================================================
+
+  # The switch on its own brings up every dependency, without the operator naming any
+  # of them: Core's identity system (server, platform realm) and its database, plus the
   # image factory. This is the full transitive chain, not just the top-level flags.
   - name: enabling provisioning pulls up identity and the image factory
     values:
