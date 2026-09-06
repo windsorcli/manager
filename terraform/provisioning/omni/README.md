@@ -3,8 +3,6 @@ title: provisioning/omni
 description: Generates Omni's config.account.id and holds an inactive etcd backup S3 config.
 ---
 
-# provisioning/omni
-
 Generates a UUID for Omni's `config.account.id`. The value stays in Terraform state, so
 every apply returns the same UUID. The Omni chart needs this ID to install, and the ID
 must stay fixed for the life of the installation.
