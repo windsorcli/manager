@@ -1,0 +1,50 @@
+apiVersion: troubleshoot.sh/v1beta2
+kind: SupportBundle
+metadata:
+  name: manager-integration
+spec:
+  collectors:
+    - clusterInfo: {}
+    - clusterResources: {}
+    - events: {}
+    - persistentVolumeClaim: {}
+    - persistentVolume: {}
+    - storageClass: {}
+    - pod: {}
+    - deployment: {}
+    - logs:
+        namespace: provisioning
+        limits:
+          maxAge: 24h
+          maxLines: 10000
+    - logs:
+        namespace: registry
+        limits:
+          maxAge: 24h
+          maxLines: 10000
+    - logs:
+        namespace: system-identity
+        limits:
+          maxAge: 24h
+          maxLines: 10000
+    - logs:
+        namespace: system-gitops
+        limits:
+          maxAge: 24h
+          maxLines: 10000
+
+  analyzers:
+    - persistentVolumeClaim:
+        outcomes:
+          - fail:
+              when: "status.phase != Bound"
+              message: "PVC is not Bound (may be stuck Terminating on a finalizer)."
+          - pass:
+              message: "PVC is bound."
+    - clusterPodStatuses:
+        outcomes:
+          - fail:
+              when: "count > 0"
+              message: "There are pods not Running or Pending."
+          - pass:
+              message: "All pods are running."
