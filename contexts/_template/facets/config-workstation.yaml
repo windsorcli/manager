@@ -1,0 +1,23 @@
+kind: Facet
+apiVersion: blueprints.windsorcli.dev/v1alpha1
+metadata:
+  name: workstation
+  description: Adjustments specific to local VM-backed workstation runtimes
+
+# A workerless single node runs the whole fleet, so Core's 4-CPU default starves the
+# provisioning/registry pods. Raise the control-plane quota on VM-backed local runtimes
+# (colima, docker-desktop) specifically -- there, the VM's own CPU allocation is a
+# separate, operator-adjustable resource from the host. workstation.runtime also
+# resolves to plain "docker" for bare-metal Linux dev machines and CI runners, whose
+# CPU budget is fixed and often much smaller (a 4-core CI runner has no headroom for
+# this bump at all), so that value is deliberately excluded.
+when: >-
+  ((workstation.runtime ?? '') == 'colima' || (workstation.runtime ?? '') == 'docker-desktop')
+  && cluster_nodes_effective.workers == 0
+  && ((provisioning.enabled ?? false) == true || (registry.enabled ?? false) == true)
+
+config:
+  - name: cluster
+    value:
+      controlplanes:
+        cpu: "${5 + ((provisioning.enabled ?? false) == true ? 1 : 0) + ((registry.enabled ?? false) == true ? 1 : 0)}"
