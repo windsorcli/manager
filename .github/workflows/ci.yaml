@@ -253,7 +253,17 @@ jobs:
       - name: Verify the omni SAML client registered
         if: success() && matrix.scenario.name == 'identity-omni'
         run: |
-          kubectl -n provisioning wait --for=condition=complete job/keycloak-omni-saml-client --timeout=5m
+          # kubectl wait --for=condition=complete blocks the full timeout on a Failed Job,
+          # since it never reaches Complete. Poll both conditions instead, so a real
+          # failure fails this step immediately.
+          for _ in $(seq 60); do
+            cond=$(kubectl -n provisioning get job/keycloak-omni-saml-client -o jsonpath='{.status.conditions[?(@.status=="True")].type}' 2>/dev/null || true)
+            case "$cond" in
+              *Failed*) echo "job/keycloak-omni-saml-client failed" >&2; kubectl -n provisioning logs -l batch.kubernetes.io/job-name=keycloak-omni-saml-client --tail=-1 >&2 || true; exit 1 ;;
+              *Complete*) break ;;
+              *) sleep 5 ;;
+            esac
+          done
           # The Job retries pods while Keycloak cold-starts; read every pod's logs, since
           # `logs job/...` picks one arbitrary attempt that may be a failed early one.
           kubectl -n provisioning logs -l batch.kubernetes.io/job-name=keycloak-omni-saml-client --tail=-1 \
@@ -285,7 +295,16 @@ jobs:
       - name: Verify Harbor OIDC configured
         if: success() && matrix.scenario.name == 'registry'
         run: |
-          kubectl -n registry wait --for=condition=complete job/keycloak-harbor-oidc --timeout=5m
+          # See the SAML-client step above: poll both conditions rather than blocking
+          # the full timeout on a Failed Job.
+          for _ in $(seq 60); do
+            cond=$(kubectl -n registry get job/keycloak-harbor-oidc -o jsonpath='{.status.conditions[?(@.status=="True")].type}' 2>/dev/null || true)
+            case "$cond" in
+              *Failed*) echo "job/keycloak-harbor-oidc failed" >&2; kubectl -n registry logs job/keycloak-harbor-oidc --tail=-1 >&2 || true; exit 1 ;;
+              *Complete*) break ;;
+              *) sleep 5 ;;
+            esac
+          done
           kubectl -n registry logs job/keycloak-harbor-oidc --tail=-1 \
             | grep -qE 'configured harbor for oidc auth'
 
