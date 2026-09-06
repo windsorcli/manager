@@ -173,7 +173,7 @@ jobs:
       - name: Setup tools
         uses: windsorcli/core/.github/actions/setup-tools@main
         with:
-          tools: terraform,kubectl,flux
+          tools: terraform,kubectl,flux,support-bundle
 
       - name: Install Windsor CLI
         uses: windsorcli/action@main
@@ -340,6 +340,22 @@ jobs:
           kubectl -n registry logs -l app.kubernetes.io/name=harbor --tail=200 || true
           kubectl -n registry logs job/keycloak-harbor-oidc --tail=200 || true
           flux get all -A || true
+
+      - name: Collect support bundle
+        if: always()
+        run: |
+          mkdir -p support-bundles
+          support-bundle --interactive=false \
+            --output=support-bundles/bundle-${{ matrix.scenario.name }}-${{ github.run_id }}-${{ github.run_number }} \
+            .github/support-bundle.yaml || true
+
+      - name: Upload support bundle
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: support-bundle-${{ matrix.scenario.name }}
+          path: support-bundles/
+          retention-days: 30
 
       - name: Windsor Down
         if: always()
