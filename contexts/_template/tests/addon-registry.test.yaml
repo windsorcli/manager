@@ -497,6 +497,30 @@ cases:
             - components:
                 - harbor/log-filter
 
+  # Metrics and the default log filter both contribute to manager-observability;
+  # the merger must fold them into one Kustomization's components, not duplicate it.
+  - name: merges metrics and the log filter into one observability kustomization
+    values:
+      platform: metal
+      network: *default-network
+      cluster: *default-cluster
+      gateway: *default-gateway
+      telemetry:
+        metrics:
+          enabled: true
+      registry:
+        enabled: true
+        harbor:
+          admin_password: supplied-by-operator
+    expect:
+      flux:
+        - name: manager-observability
+          resources:
+            - components:
+                - prometheus/alerts/harbor
+                - grafana/dashboards/harbor
+                - harbor/log-filter
+
   # Log pipeline off entirely: nothing for a Fluentd ClusterFilter to attach to.
   - name: leaves the log filter out when the log pipeline is disabled
     values:
