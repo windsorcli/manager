@@ -5,11 +5,14 @@ metadata:
   description: Sizes the workerless control-plane CPU quota to the enabled fleet
 
 # A workerless single node runs the whole fleet, so Core's 4-CPU default starves the
-# provisioning/registry pods. Raise the control-plane quota on any local VM-backed
-# runtime (colima, docker-desktop, docker) -- workstation.runtime is only set at all
-# for local docker clusters, so checking it's set covers all three the same way.
+# provisioning/registry pods. Raise the control-plane quota on VM-backed local runtimes
+# (colima, docker-desktop) specifically -- there, the VM's own CPU allocation is a
+# separate, operator-adjustable resource from the host. workstation.runtime also
+# resolves to plain "docker" for bare-metal Linux dev machines and CI runners, whose
+# CPU budget is fixed and often much smaller (a 4-core CI runner has no headroom for
+# this bump at all), so that value is deliberately excluded.
 when: >-
-  (workstation.runtime ?? '') != ''
+  ((workstation.runtime ?? '') == 'colima' || (workstation.runtime ?? '') == 'docker-desktop')
   && cluster_nodes_effective.workers == 0
   && ((provisioning.enabled ?? false) == true || (registry.enabled ?? false) == true)
 
