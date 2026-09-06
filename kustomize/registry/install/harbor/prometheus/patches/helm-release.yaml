@@ -1,0 +1,12 @@
+# The chart adds a /metrics port to each component's existing Service rather than a
+# dedicated metrics Service (unlike image-factory/omni), all scraped under one
+# ServiceMonitor as job="harbor". The alerts and dashboard read the exporter's own
+# harbor_health/harbor_up{component}/harbor_* metrics rather than per-component scrape
+# up{}, so no relabeling is needed to tell core/registry/jobservice/exporter apart.
+- op: add
+  path: /spec/values/metrics
+  value:
+    enabled: true
+    serviceMonitor:
+      enabled: true
+      interval: 30s

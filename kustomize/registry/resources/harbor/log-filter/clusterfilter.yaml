@@ -1,0 +1,17 @@
+# Drops nginx access-log lines from Harbor's own liveness/readiness probes (kubelet hits
+# / and /api/v2.0/ping every few seconds), the same volume-noise problem the log-level
+# filters address for TRACE/DEBUG. This is the first per-addon Fluentd filter in this
+# repo: ClusterFilter is cluster-scoped and matches by log content only, not by
+# namespace or container, so it stays this narrow rather than risk over-excluding.
+apiVersion: fluentd.fluent.io/v1alpha1
+kind: ClusterFilter
+metadata:
+  name: harbor-probe-noise
+  labels:
+    filter.fluentd.fluent.io/enabled: "true"
+spec:
+  filters:
+    - grep:
+        exclude:
+          - key: log
+            pattern: '"(GET|HEAD) (/|/api/v2\.0/ping) HTTP/[0-9.]+" 200'

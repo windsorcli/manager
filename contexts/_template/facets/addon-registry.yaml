@@ -103,6 +103,7 @@ flux:
         - database
         - harbor
         - "${object_store.driver == 'hetzner' || object_store.driver == 'aws' ? 'harbor/s3' : ''}"
+        - "${(telemetry.metrics.enabled ?? false) == true ? 'harbor/prometheus' : ''}"
       substitutions:
         harbor_hostname: "${harbor_effective.hostname}${workstation.runtime == 'docker-desktop' ? ':8443' : ''}"
         harbor_storage_class: "${cluster.storage.class ?? 'single'}"
@@ -150,4 +151,28 @@ flux:
         # At least the Job's own activeDeadlineSeconds (40m) — a shorter Flux
         # timeout would give up before Kubernetes ever kills the Job itself.
         timeout: 40m
+        interval: 5m
+
+  # Both contribute into config-observability.yaml's manager-observability
+  # Kustomization rather than owning their own — see that facet's comment for why
+  # (name collision risk with Core's own observability/telemetry).
+  - name: manager-observability
+    when: registry.enabled == true && (telemetry.metrics.enabled ?? false) == true
+    resources:
+      - components:
+          - prometheus/alerts/harbor
+          - grafana/dashboards/harbor
+        timeout: 5m
+        interval: 5m
+
+  # ClusterFilter is cluster-scoped and fluent-operator picks it up by label, not by
+  # which Kustomization applied it, so this rides in the same shared Kustomization as
+  # the alerts/dashboards above rather than needing its own. Gated on the log pipeline
+  # actually running fluentd — driver: none ships no aggregator for this to attach to.
+  - name: manager-observability
+    when: registry.enabled == true && (telemetry.logs.enabled ?? true) == true && (telemetry.logs.driver ?? 'fluentd') == 'fluentd'
+    resources:
+      - components:
+          - harbor/log-filter
+        timeout: 5m
         interval: 5m

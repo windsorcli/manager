@@ -1,0 +1,87 @@
+rule_files:
+  - .rendered-rule.yml
+
+evaluation_interval: 1m
+
+tests:
+  # No up{job="harbor"} series at all -- absent() is active from t=0.
+  - interval: 1m
+    input_series: []
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: HarborMetricsAbsent
+        exp_alerts: []
+      - eval_time: 11m
+        alertname: HarborMetricsAbsent
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              job: harbor
+            exp_annotations:
+              summary: 'Harbor metrics absent (job harbor)'
+              description: "Harbor has disappeared from Prometheus service discovery entirely.\n  VALUE = 1\n  LABELS = map[job:harbor]"
+
+  - interval: 1m
+    input_series:
+      - series: 'up{job="harbor",instance="10.244.0.12:8001"}'
+        values: '1+0x20'
+    alert_rule_test:
+      - eval_time: 11m
+        alertname: HarborMetricsAbsent
+        exp_alerts: []
+
+  # harbor_health drops to 0 at t=0 and stays there past the 5m "for" window.
+  - interval: 1m
+    input_series:
+      - series: 'harbor_health'
+        values: '0+0x20'
+    alert_rule_test:
+      - eval_time: 2m
+        alertname: HarborUnhealthy
+        exp_alerts: []
+      - eval_time: 6m
+        alertname: HarborUnhealthy
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+            exp_annotations:
+              summary: 'Harbor reports itself unhealthy'
+              description: "Harbor's own /api/v2.0/health check has been reporting unhealthy for 5 minutes.\n  VALUE = 0\n  LABELS = map[__name__:harbor_health]"
+
+  - interval: 1m
+    input_series:
+      - series: 'harbor_health'
+        values: '1+0x20'
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: HarborUnhealthy
+        exp_alerts: []
+
+  # registry unhealthy while core stays healthy -- component actually distinguishes them.
+  - interval: 1m
+    input_series:
+      - series: 'harbor_up{component="core"}'
+        values: '1+0x20'
+      - series: 'harbor_up{component="registry"}'
+        values: '0+0x20'
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: HarborComponentUnhealthy
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              component: registry
+            exp_annotations:
+              summary: 'Harbor component unhealthy (registry)'
+              description: "Harbor reports its registry component unhealthy for 5 minutes.\n  VALUE = 0\n  LABELS = map[__name__:harbor_up component:registry]"
+
+  - interval: 1m
+    input_series:
+      - series: 'harbor_up{component="core"}'
+        values: '1+0x20'
+      - series: 'harbor_up{component="registry"}'
+        values: '1+0x20'
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: HarborComponentUnhealthy
+        exp_alerts: []

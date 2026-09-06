@@ -1,0 +1,32 @@
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+
+# Hand-authored, not vendored: no upstream Harbor Grafana dashboard exists (checked
+# grafana.com and the goharbor/harbor repo -- neither publish one). Panels are built
+# from the exporter's own metrics (harbor_health, harbor_up, harbor_statistics_*,
+# harbor_task_queue_*), verified against the exporter's source
+# (src/pkg/exporter/*_collector.go in goharbor/harbor), the same metrics
+# prometheus/alerts/harbor's PrometheusRule alerts on. Requires only harbor/prometheus
+# (telemetry.metrics.enabled), same as the alerts.
+#
+# namespace: system-observability, not registry -- same reasoning as
+# grafana/dashboards/omni: the kiwigrid/k8s-sidecar Grafana runs is scoped to its own
+# namespace, not cluster-wide.
+#
+# harbor-overview-dashboard.json's every ${datasource} is escaped to $${datasource} --
+# Flux's postBuild substitution walks every resource in this Kustomization and fails
+# strict-mode on any ${...} it doesn't recognize, and Grafana's own templating
+# variable isn't one of Flux's. Same convention grafana/dashboards/image-factory and
+# grafana/dashboards/omni use.
+
+configMapGenerator:
+  - name: grafana-dashboard-harbor
+    namespace: system-observability
+    files:
+      - harbor-overview-dashboard.json
+    options:
+      disableNameSuffixHash: true
+      labels:
+        grafana_dashboard: "1"
+      annotations:
+        grafana_folder: "Registry"
