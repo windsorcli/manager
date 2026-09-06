@@ -317,7 +317,10 @@ jobs:
         if: success() && matrix.scenario.name == 'registry'
         run: |
           kubectl -n registry get servicemonitor harbor
-          kubectl get clusterfilter harbor-probe-noise
+          # fluent-operator registers ClusterFilter under two API groups
+          # (fluentbit.fluent.io and fluentd.fluent.io) -- the bare kind resolves to
+          # the wrong one, so this has to be qualified.
+          kubectl get clusterfilter.fluentd.fluent.io harbor-probe-noise
 
       - name: Diagnostics on failure
         if: failure()
