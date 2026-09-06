@@ -4,7 +4,18 @@ Skills are defined in `.claude/skills/` and are discovered automatically by Clau
 
 ## Non-negotiable rules
 
-1. **Code comments** — describe current behavior and non-obvious constraints only. No issue/PR/ADR citations (`cli#3097`, `see ADR-0004`), no process or reasoning narrative ("this is what makes X possible"), no change history ("previously X, now Y"). If it wouldn't confuse a reader without the comment, don't write it. That reasoning belongs in the commit message or a docs/adr file, never in the code. **Be terse.** One line, two at most — if a comment is explaining a design decision's full history and rationale rather than stating the one non-obvious fact a reader needs, cut it down or move it to the ADR. Match the comment density of the surrounding file; don't out-write the code it's attached to.
+1. **Code comments** — describe current behavior and non-obvious constraints only. No issue/PR/ADR citations (`cli#3097`, `see ADR-0004`), no process or reasoning narrative ("this is what makes X possible"), no change history ("previously X, now Y"). If it wouldn't confuse a reader without the comment, don't write it. That reasoning belongs in the commit message or a docs/adr file, never in the code. **Hard cap: one line, ~15 words.** State the one non-obvious fact, not the chain of reasoning that led to it — no "and", "because X, so Y, which means Z" clause-chaining to smuggle in a second and third sentence. Two lines only if genuinely unavoidable, never three+. Match the comment density of the surrounding file. Before writing a comment, draft it, then cut it in half.
+
+   Bad (multi-clause, explains history/reasoning):
+   ```
+   # nginx fronts every request but has no /metrics of its own, and the exporter's own
+   # health checks talk to harbor-core directly, bypassing nginx entirely -- so
+   # harbor_health/harbor_up both stay green even if nginx itself is down.
+   ```
+   Good (states the fact):
+   ```
+   # nginx has no /metrics; harbor_health/harbor_up don't reflect its state.
+   ```
 
 2. **The Core boundary** — follow `docs/adr/0001-layering-on-core.md`. Manager authors only what a fleet needs; a single-cluster capability belongs in Core. Turn Core capabilities on through context values, never redeclare a Core facet or schema key.
 
