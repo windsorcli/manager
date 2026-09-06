@@ -44,7 +44,7 @@ spec:
     - clusterPodStatuses:
         outcomes:
           - fail:
-              when: "count > 0"
-              message: "There are pods not Running or Pending."
+              when: "!= Healthy"
+              message: "Pod {{ .Namespace }}/{{ .Name }} is unhealthy."
           - pass:
               message: "All pods are running."
