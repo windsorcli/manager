@@ -144,8 +144,9 @@ jobs:
       fail-fast: false
       matrix:
         scenario:
-          # up_timeout: identity-omni needs room for Keycloak's cold start. registry
-          # needs room for Harbor and CNPG. image-factory is the lightest track.
+          # up_timeout: identity-omni and registry both carry Keycloak's cold start.
+          # registry also runs Harbor and CNPG alongside it, so it gets the most room.
+          # image-factory is the lightest track.
           - name: image-factory
             sets: --set provisioning.image_factory.enabled=true
             up_timeout: 15
@@ -154,10 +155,13 @@ jobs:
             sets: --set identity.enabled=true --set provisioning.omni.enabled=true
             up_timeout: 30
             job_timeout: 45
+          # identity.enabled=true turns on Harbor's OIDC job (see addon-registry.yaml
+          # harbor_effective.sso) — without it, this track never proves Harbor's SSO
+          # wiring actually works, only that Harbor itself installs.
           - name: registry
-            sets: --set registry.enabled=true
-            up_timeout: 25
-            job_timeout: 40
+            sets: --set registry.enabled=true --set identity.enabled=true
+            up_timeout: 40
+            job_timeout: 55
     steps:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -275,6 +279,16 @@ jobs:
           kubectl -n registry get httproute harbor -o yaml >&2 || true
           exit 1
 
+      # windsor up --wait proves the oidc Job reached Complete. What it can't prove is that
+      # the Job actually registered Harbor's OIDC client and switched Harbor to oidc_auth,
+      # rather than exiting 0 having done nothing.
+      - name: Verify Harbor OIDC configured
+        if: success() && matrix.scenario.name == 'registry'
+        run: |
+          kubectl -n registry wait --for=condition=complete job/keycloak-harbor-oidc --timeout=5m
+          kubectl -n registry logs job/keycloak-harbor-oidc --tail=-1 \
+            | grep -qE 'configured harbor for oidc auth'
+
       - name: Diagnostics on failure
         if: failure()
         run: |
@@ -291,6 +305,7 @@ jobs:
           kubectl -n registry describe pods || true
           kubectl -n registry get httproute harbor -o yaml || true
           kubectl -n registry logs -l app.kubernetes.io/name=harbor --tail=200 || true
+          kubectl -n registry logs job/keycloak-harbor-oidc --tail=200 || true
           flux get all -A || true
 
       - name: Windsor Down
