@@ -42,3 +42,14 @@ spec:
           annotations:
             summary: Harbor component unhealthy ({{ $labels.component }})
             description: "Harbor reports its {{ $labels.component }} component unhealthy for 5 minutes.\n  VALUE = {{ $value }}\n  LABELS = {{ $labels }}"
+
+        # nginx has no /metrics and the exporter checks harbor-core directly, so
+        # harbor_health/harbor_up stay green even if nginx is down. Use pod readiness instead.
+        - alert: HarborNginxNotReady
+          expr: absent(kube_pod_status_ready{namespace="registry",pod=~"harbor-nginx-.*",condition="true"} == 1)
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: Harbor nginx not ready
+            description: "No ready harbor-nginx pod for 5 minutes -- Harbor's UI, API, and registry push/pull are all unreachable even though harbor_health may still read healthy.\n  VALUE = {{ $value }}\n  LABELS = {{ $labels }}"
