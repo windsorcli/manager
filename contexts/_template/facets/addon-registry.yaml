@@ -169,6 +169,9 @@ flux:
   # which Kustomization applied it, so this rides in the same shared Kustomization as
   # the alerts/dashboards above rather than needing its own. Gated on the log pipeline
   # actually running fluentd — driver: none ships no aggregator for this to attach to.
+  # config-observability.yaml's own manager-observability entry also requires
+  # telemetry.metrics.enabled == true, so this stays off if an operator disables
+  # metrics while keeping logs on — both default on, so this rarely bites.
   - name: manager-observability
     when: registry.enabled == true && (telemetry.logs.enabled ?? true) == true && (telemetry.logs.driver ?? 'fluentd') == 'fluentd'
     resources:
