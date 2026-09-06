@@ -360,7 +360,15 @@ jobs:
       - name: Windsor Down
         if: always()
         run: |
-          windsor destroy --confirm local || true
+          if ! windsor destroy --confirm local; then
+            echo "::group::destroy timed out -- stuck-resource diagnostics"
+            kubectl get kustomizations -A || true
+            kubectl get pvc,svc,ingress,certificate -A | grep -i Terminating || echo "no Terminating objects found"
+            for name in $(kubectl get kustomizations -A -o jsonpath='{range .items[?(@.status.conditions[-1].status!="True")]}{.metadata.namespace}{" "}{.metadata.name}{"\n"}{end}'); do
+              kubectl describe kustomization -n ${name% *} ${name#* } || true
+            done
+            echo "::endgroup::"
+          fi
           windsor down || true
 
   # ===========================================================================
