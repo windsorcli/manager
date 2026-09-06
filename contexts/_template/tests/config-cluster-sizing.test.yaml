@@ -1,6 +1,6 @@
 # config-cluster-sizing.yaml facet tests
-# Covers the docker-desktop CPU quota bump: the per-addon sizing formula and the
-# docker-desktop guard.
+# Covers the local-runtime CPU quota bump: the per-addon sizing formula and the
+# workstation.runtime guard (any local VM-backed runtime, not just docker-desktop).
 
 x-defaults:
   network: &default-network
@@ -53,7 +53,29 @@ cases:
       config:
         cluster:
           controlplanes:
-            cpu: 7
+            cpu: "7"
+
+  # colima is just as workerless-single-node as docker-desktop -- same bump applies.
+  - name: sizes cpu for the full fleet on colima
+    values:
+      dev: true
+      platform: docker
+      network: *default-network
+      cluster: *default-cluster
+      workstation:
+        runtime: colima
+      identity:
+        enabled: true
+      provisioning:
+        enabled: true
+      registry:
+        enabled: true
+    terraformOutputs: *docker-outputs
+    expect:
+      config:
+        cluster:
+          controlplanes:
+            cpu: "7"
 
   # One addon lands at base 5 plus a single core.
   - name: sizes cpu for registry alone on docker-desktop
@@ -71,7 +93,7 @@ cases:
       config:
         cluster:
           controlplanes:
-            cpu: 6
+            cpu: "6"
 
   - name: sizes cpu for provisioning alone on docker-desktop
     values:
@@ -90,7 +112,7 @@ cases:
       config:
         cluster:
           controlplanes:
-            cpu: 6
+            cpu: "6"
 
   # Neither addon enabled: the facet stays inert and Core's own default holds.
   - name: leaves the cpu quota alone with neither addon enabled
@@ -104,11 +126,15 @@ cases:
       identity:
         enabled: true
     terraformOutputs: *docker-outputs
-    expect:
+    # cpu: 4 is Core's own schema default, applied later at terraform-input resolution --
+    # it never appears in the config: scope itself, so there's nothing to assert it equals.
+    # What this proves instead: the facet's own base formula (5, with neither addon's +1)
+    # never fired.
+    exclude:
       config:
         cluster:
           controlplanes:
-            cpu: 4
+            cpu: "5"
 
   # An operator's explicit quota wins over the computed bump.
   - name: an explicit cpu quota is not overridden
@@ -139,7 +165,7 @@ cases:
       config:
         cluster:
           controlplanes:
-            cpu: 3
+            cpu: "3"
 
   # A worker pool runs the workloads, so the control-plane quota is left at Core's default.
   - name: leaves the control-plane quota alone when a worker pool exists
@@ -166,8 +192,10 @@ cases:
       registry:
         enabled: true
     terraformOutputs: *docker-outputs
-    expect:
+    # Same reasoning as the case above: proves the facet's fully-bumped value (7, both
+    # addons) never fired, rather than asserting Core's schema default directly.
+    exclude:
       config:
         cluster:
           controlplanes:
-            cpu: 4
+            cpu: "7"
