@@ -1,7 +1,8 @@
 # addon-registry.yaml facet tests
 # Covers the enabled/disabled gate, the required admin password and gateway, the
 # database fan-on, storage landing on a PVC vs an object-store bucket, the terraform
-# bucket provisioning on hetzner/aws, and the SSO wiring.
+# bucket provisioning on hetzner/aws, the SSO wiring, and the metrics/log-filter
+# observability contributions.
 
 x-defaults:
   network: &default-network
@@ -413,6 +414,155 @@ cases:
           resources:
             - components:
                 - harbor/gateway
+
+  # telemetry.metrics.enabled adds both the metrics port/ServiceMonitor patch and the
+  # shared manager-observability contribution (alerts + dashboard).
+  - name: adds metrics and observability when metrics are enabled
+    values:
+      platform: metal
+      network: *default-network
+      cluster: *default-cluster
+      gateway: *default-gateway
+      telemetry:
+        metrics:
+          enabled: true
+      registry:
+        enabled: true
+        harbor:
+          admin_password: supplied-by-operator
+    expect:
+      flux:
+        - name: registry
+          install:
+            components:
+              - database
+              - harbor
+              - harbor/prometheus
+        - name: manager-observability
+          resources:
+            - components:
+                - prometheus/alerts/harbor
+                - grafana/dashboards/harbor
+
+  # No metrics: neither the ServiceMonitor patch nor the manager-observability
+  # contribution has anything to scrape.
+  - name: leaves metrics and observability out without metrics enabled
+    values:
+      platform: metal
+      network: *default-network
+      cluster: *default-cluster
+      gateway: *default-gateway
+      telemetry:
+        metrics:
+          enabled: false
+      registry:
+        enabled: true
+        harbor:
+          admin_password: supplied-by-operator
+    expect:
+      flux:
+        - name: registry
+          install:
+            components:
+              - database
+              - harbor
+    exclude:
+      flux:
+        - name: registry
+          install:
+            components:
+              - harbor/prometheus
+        - name: manager-observability
+          resources:
+            - components:
+                - prometheus/alerts/harbor
+                - grafana/dashboards/harbor
+
+  # telemetry.logs defaults to enabled with driver: fluentd, so the probe-noise
+  # filter rides along by default -- no explicit --set needed.
+  - name: adds the harbor log filter by default
+    values:
+      platform: metal
+      network: *default-network
+      cluster: *default-cluster
+      gateway: *default-gateway
+      registry:
+        enabled: true
+        harbor:
+          admin_password: supplied-by-operator
+    expect:
+      flux:
+        - name: manager-observability
+          resources:
+            - components:
+                - harbor/log-filter
+
+  # Metrics and the default log filter both contribute to manager-observability;
+  # the merger must fold them into one Kustomization's components, not duplicate it.
+  - name: merges metrics and the log filter into one observability kustomization
+    values:
+      platform: metal
+      network: *default-network
+      cluster: *default-cluster
+      gateway: *default-gateway
+      telemetry:
+        metrics:
+          enabled: true
+      registry:
+        enabled: true
+        harbor:
+          admin_password: supplied-by-operator
+    expect:
+      flux:
+        - name: manager-observability
+          resources:
+            - components:
+                - prometheus/alerts/harbor
+                - grafana/dashboards/harbor
+                - harbor/log-filter
+
+  # Log pipeline off entirely: nothing for a Fluentd ClusterFilter to attach to.
+  - name: leaves the log filter out when the log pipeline is disabled
+    values:
+      platform: metal
+      network: *default-network
+      cluster: *default-cluster
+      gateway: *default-gateway
+      telemetry:
+        logs:
+          enabled: false
+      registry:
+        enabled: true
+        harbor:
+          admin_password: supplied-by-operator
+    exclude:
+      flux:
+        - name: manager-observability
+          resources:
+            - components:
+                - harbor/log-filter
+
+  # driver: none ships a shipper with no aggregator -- same reasoning as above, just
+  # via the other half of the gate.
+  - name: leaves the log filter out when the log driver is none
+    values:
+      platform: metal
+      network: *default-network
+      cluster: *default-cluster
+      gateway: *default-gateway
+      telemetry:
+        logs:
+          driver: none
+      registry:
+        enabled: true
+        harbor:
+          admin_password: supplied-by-operator
+    exclude:
+      flux:
+        - name: manager-observability
+          resources:
+            - components:
+                - harbor/log-filter
 
   # Off by default.
   - name: excludes harbor when the addon is disabled

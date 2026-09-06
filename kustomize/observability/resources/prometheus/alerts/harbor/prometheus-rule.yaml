@@ -1,0 +1,55 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: harbor-alerts
+  namespace: registry
+spec:
+  groups:
+    - name: harbor-supplemental.rules
+      rules:
+        # job is the ServiceMonitor's own jobLabel (app.kubernetes.io/name), identical
+        # across every Harbor component the chart scrapes under one ServiceMonitor.
+        - alert: HarborMetricsAbsent
+          expr: absent(up{job="harbor"})
+          for: 10m
+          labels:
+            severity: critical
+          annotations:
+            summary: Harbor metrics absent (job {{ $labels.job }})
+            description: "Harbor has disappeared from Prometheus service discovery entirely.\n  VALUE = {{ $value }}\n  LABELS = {{ $labels }}"
+
+        # harbor_health is the exporter's own gauge, sourced from Harbor's
+        # /api/v2.0/health endpoint (1 healthy, 0 not) -- Harbor's own verdict on
+        # itself, not just whether something answers on the metrics port.
+        - alert: HarborUnhealthy
+          expr: harbor_health == 0
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: Harbor reports itself unhealthy
+            description: "Harbor's own /api/v2.0/health check has been reporting unhealthy for 5 minutes.\n  VALUE = {{ $value }}\n  LABELS = {{ $labels }}"
+
+        # harbor_up carries one series per component /api/v2.0/health enumerates --
+        # core, portal, jobservice, registry, registryctl, database, redis, and trivy
+        # when scanning is on -- so this fires per component, not just on Harbor's
+        # overall verdict above.
+        - alert: HarborComponentUnhealthy
+          expr: harbor_up == 0
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: Harbor component unhealthy ({{ $labels.component }})
+            description: "Harbor reports its {{ $labels.component }} component unhealthy for 5 minutes.\n  VALUE = {{ $value }}\n  LABELS = {{ $labels }}"
+
+        # nginx has no /metrics and the exporter checks harbor-core directly, so
+        # harbor_health/harbor_up stay green even if nginx is down. Use pod readiness instead.
+        - alert: HarborNginxNotReady
+          expr: absent(kube_pod_status_ready{namespace="registry",pod=~"harbor-nginx-.*",condition="true"} == 1)
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: Harbor nginx not ready
+            description: "No ready harbor-nginx pod for 5 minutes -- Harbor's UI, API, and registry push/pull are all unreachable even though harbor_health may still read healthy.\n  VALUE = {{ $value }}\n  LABELS = {{ $labels }}"

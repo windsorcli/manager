@@ -1,0 +1,21 @@
+# Drops nginx probe-log noise (kubelet hits / and /api/v2.0/ping every few seconds).
+# Scoped to the registry namespace's nginx container so it can't swallow other workloads' logs.
+apiVersion: fluentd.fluent.io/v1alpha1
+kind: ClusterFilter
+metadata:
+  name: harbor-probe-noise
+  labels:
+    filter.fluentd.fluent.io/enabled: "true"
+spec:
+  filters:
+    - grep:
+        and:
+          - exclude:
+              key: $.kubernetes.namespace_name
+              pattern: ^registry$
+          - exclude:
+              key: $.kubernetes.container_name
+              pattern: ^nginx$
+          - exclude:
+              key: log
+              pattern: '"(GET|HEAD) (/|/api/v2\.0/ping) HTTP/[0-9.]+" 200'

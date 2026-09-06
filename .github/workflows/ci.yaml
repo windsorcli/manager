@@ -159,7 +159,7 @@ jobs:
           # harbor_effective.sso) — without it, this track never proves Harbor's SSO
           # wiring actually works, only that Harbor itself installs.
           - name: registry
-            sets: --set registry.enabled=true --set identity.enabled=true
+            sets: --set registry.enabled=true --set identity.enabled=true --set telemetry.metrics.enabled=true
             up_timeout: 40
             job_timeout: 55
     steps:
@@ -307,6 +307,20 @@ jobs:
           done
           kubectl -n registry logs job/keycloak-harbor-oidc --tail=-1 \
             | grep -qE 'configured harbor for oidc auth'
+
+      # windsor up --wait proves the PrometheusRule and dashboard ConfigMap applied;
+      # it doesn't prove the ServiceMonitor actually resolved a scrapeable target.
+      # Checking for the ClusterFilter's own existence here, not its filtering
+      # behavior — proving fluentd actually drops the matched log lines needs a live
+      # log-content check this step doesn't attempt.
+      - name: Verify Harbor metrics and log filter applied
+        if: success() && matrix.scenario.name == 'registry'
+        run: |
+          kubectl -n registry get servicemonitor harbor
+          # fluent-operator registers ClusterFilter under two API groups
+          # (fluentbit.fluent.io and fluentd.fluent.io) -- the bare kind resolves to
+          # the wrong one, so this has to be qualified.
+          kubectl get clusterfilter.fluentd.fluent.io harbor-probe-noise
 
       - name: Diagnostics on failure
         if: failure()
