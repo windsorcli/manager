@@ -19,7 +19,7 @@ spec:
     spec:
       chart: image-factory
       # renovate: datasource=docker depName=image-factory-chart package=ghcr.io/siderolabs/charts/image-factory
-      version: 1.5.0
+      version: 1.6.1
       sourceRef:
         kind: HelmRepository
         name: siderolabs
