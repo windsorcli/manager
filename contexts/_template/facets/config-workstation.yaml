@@ -1,8 +1,8 @@
 kind: Facet
 apiVersion: blueprints.windsorcli.dev/v1alpha1
 metadata:
-  name: cluster-sizing
-  description: Sizes the workerless control-plane CPU quota to the enabled fleet
+  name: workstation
+  description: Adjustments specific to local VM-backed workstation runtimes
 
 # A workerless single node runs the whole fleet, so Core's 4-CPU default starves the
 # provisioning/registry pods. Raise the control-plane quota on VM-backed local runtimes

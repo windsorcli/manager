@@ -1,4 +1,4 @@
-# config-cluster-sizing.yaml facet tests
+# config-workstation.yaml facet tests
 # Covers the VM-backed runtime CPU quota bump (colima, docker-desktop): the per-addon
 # sizing formula and the workstation.runtime guard -- including that plain "docker"
 # (bare-metal Linux dev machines and CI runners, whose real CPU budget this facet
