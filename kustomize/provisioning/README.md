@@ -136,18 +136,12 @@ operator's browser use this same URL.
 | Name | Required when | Effect |
 |---|---|---|
 | `external_domain` | always | Domain the factory is served under; the hostname is `factory.<external_domain>`. Public domain when set, otherwise the private domain or the cluster domain. |
-| `factory_schematic_registry` | always | OCI registry the factory pushes generated schematics to. Needs push access; the chart's `registry.example.com` is a placeholder, not a working default. |
+| `factory_schematic_registry` | always | OCI registry the factory pushes generated schematics to. Needs push access. Defaults to the registry capability (registry.driver, kustomize/registry/) unless provisioning.image_factory.registry.schematic.registry names an external one. |
 | `factory_schematic_namespace` | optional | Repository path prefix for schematics. Defaults to `siderolabs/image-factory`. |
 | `factory_schematic_repository` | optional | Repository name for schematics. Defaults to `schematics`. |
-| `factory_schematic_insecure` | optional | Allow HTTP or invalid TLS to the schematic registry. Defaults to `false`. |
+| `factory_schematic_insecure` | optional | Allow HTTP or invalid TLS to the schematic registry. Defaults to the registry capability's own posture (plain HTTP in-cluster). |
 | `factory_max_concurrency` | optional | Simultaneous asset builds. Defaults to `6`; each build is CPU-bound, so raise it with the node pool rather than ahead of it. |
 | `factory_min_talos_version` | optional | Oldest Talos release assets are generated for. Defaults to `1.2.0`. |
-| `registry_bucket` | `registry/s3` | Bucket backing the in-cluster registry. Built from `object_store.prefix`, the same expression that names the bucket the object-store Terraform module provisions. |
-| `registry_region` | `registry/s3` | Region embedded in the S3 v4 signature, from `object_store.region` — the Hetzner object storage location, or the AWS region. |
-| `registry_endpoint` | `registry/s3` | S3 endpoint the registry writes to, from `object_store.endpoint`. |
-| `registry_storage_class` | `registry/pvc` | Storage class for the registry volume. Defaults to `cluster.storage.class`, or `single`. |
-| `registry_storage_size` | `registry/pvc` | Size of the registry volume. Defaults to `10Gi`. |
-| `registry_replicas` | optional | Registry replicas. Two on `topology: ha` where a bucket backs it, otherwise one — a PVC cannot be shared across replicas. |
 | `omni_account_id` | always | UUID for `config.account.id`, from `provisioning.omni.account_id` or the `omni-account` Terraform module's state. |
 | `omni_hostname` | always | Base hostname Omni's UI/API advertises, from `provisioning.omni.hostname` or derived as `omni.<domain>`. |
 | `omni_persistence_size` | always | Size of the volume backing Omni's embedded etcd, secondary SQLite storage, and machine logs. Defaults to `16Gi`. |
@@ -167,9 +161,6 @@ operator's browser use this same URL.
 
 | Component | Enable when | Effect |
 |---|---|---|
-| `registry` | no external schematic registry is named | In-cluster OCI registry (`distribution`) holding schematics and cached boot assets. Reached at `registry.provisioning.svc.cluster.local:5000` over plain HTTP; no route, and a NetworkPolicy admits only the factory pod on 5000. |
-| `registry/pvc` | `object_store.driver` is neither `hetzner` nor `aws` | Backs the registry with a volumeClaimTemplate on the default storage class, in place of its default emptyDir. Without it a restart loses every schematic id already handed out. |
-| `registry/s3` | `object_store.driver` is `hetzner` or `aws` | Backs the registry with a bucket from the platform's object store instead of a volume. Limited to the platforms the registry holds credentials for: Hetzner keys come from `hetzner.object_storage`, and on AWS an empty key pair leaves the S3 driver on the instance credential chain. A minio object store stays on a PVC until credentials for one exist. |
 | `image-factory` | `provisioning.image_factory.enabled == true` | Helm release of the Sidero Labs `image-factory` chart in `provisioning`, from `oci://ghcr.io/siderolabs/charts`. Serves the UI, API, and registry frontends on :8080. Runs as uid 1000, non-root, baseline PSA-compatible. The chart supports only the Recreate deployment strategy. |
 | `image-factory/ha` | `topology == 'ha'` | Two replicas with pod anti-affinity across nodes. Redundancy against node loss only — the Recreate strategy means rollouts still have a gap. Safe because builds are stateless: schematics live in the registry, cached assets in the cache backend. |
 | `image-factory/prometheus` | `telemetry.metrics.enabled == true` | Metrics Service on :2122 plus a ServiceMonitor. Both are needed — the chart leaves the metrics Service off by default, so a ServiceMonitor alone would have nothing to scrape. |

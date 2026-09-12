@@ -122,6 +122,10 @@ cases:
           controlplanes:
             cpu: "6"
 
+  # provisioning.enabled fans on image_factory, and image_factory always wants a
+  # registry of its own now (addon-provisioning.yaml turns registry.enabled on unless
+  # an external registry is named) — so "provisioning alone" still costs both cores,
+  # the same as the full-fleet case above.
   - name: sizes cpu for provisioning alone on docker-desktop
     values:
       dev: true
@@ -139,7 +143,7 @@ cases:
       config:
         cluster:
           controlplanes:
-            cpu: "6"
+            cpu: "7"
 
   # Neither addon enabled: the facet stays inert and Core's own default holds.
   - name: leaves the cpu quota alone with neither addon enabled

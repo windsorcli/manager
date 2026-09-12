@@ -79,10 +79,6 @@ properties:
           external_url:
             type: string
             description: Base URL the factory publishes in download links and installer references. Derived from the domain when unset; set it where the gateway is reached on a non-standard port or through another name.
-          registry_size:
-            type: string
-            default: 10Gi
-            description: Size of the volume backing the in-cluster registry, where no object storage exists. Holds schematics and cached boot assets.
           max_concurrency:
             type: integer
             minimum: 1
@@ -104,7 +100,7 @@ properties:
                 properties:
                   registry:
                     type: string
-                    description: OCI registry the factory writes generated schematics to. It needs push access; this is not a mirror.
+                    description: OCI registry the factory writes generated schematics to. It needs push access. Defaults to the registry capability; set this to point at an external registry instead.
                   namespace:
                     type: string
                     default: siderolabs/image-factory
@@ -198,8 +194,7 @@ properties:
     additionalProperties: false
 
   # Fleet container registry. Capability-plus-driver, the same shape Core's own
-  # identity.driver/database.postgres.driver use — one driver today, room for another
-  # without a breaking schema change later.
+  # identity.driver/database.postgres.driver use.
   registry:
     type: object
     properties:
@@ -211,8 +206,18 @@ properties:
         type: string
         enum:
           - harbor
-        default: harbor
-        description: harbor hosts a full-featured self-hosted registry (scanning, RBAC, UI, replication).
+          - distribution
+        default: distribution
+        description: distribution is a bare, anonymous OCI store, the cheap default. harbor is a full-featured self-hosted registry (scanning, RBAC, UI, replication).
+      distribution:
+        type: object
+        description: Bare registry settings (driver distribution)
+        properties:
+          storage_size:
+            type: string
+            default: 10Gi
+            description: Size of the volume backing the registry, where no object storage exists.
+        additionalProperties: false
       harbor:
         type: object
         description: Hosted Harbor settings (driver harbor)

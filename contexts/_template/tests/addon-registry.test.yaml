@@ -41,6 +41,7 @@ cases:
       gateway: *default-gateway
       registry:
         enabled: true
+        driver: harbor
     expect:
       flux:
         - name: registry
@@ -93,6 +94,7 @@ cases:
       gateway: *default-gateway
       registry:
         enabled: true
+        driver: harbor
         harbor:
           proxy_cache:
             - name: docker-hub
@@ -120,6 +122,7 @@ cases:
       gateway: *default-gateway
       registry:
         enabled: true
+        driver: harbor
         harbor:
           gc:
             schedule: "0 0 4 * * 0"
@@ -146,6 +149,7 @@ cases:
       gateway: *default-gateway
       registry:
         enabled: true
+        driver: harbor
         harbor:
           gc:
             enabled: false
@@ -176,6 +180,7 @@ cases:
         enabled: true
       registry:
         enabled: true
+        driver: harbor
     expect:
       flux:
         - name: registry
@@ -213,6 +218,7 @@ cases:
         enabled: true
       registry:
         enabled: true
+        driver: harbor
         harbor:
           admin_password: supplied-by-operator
     expect:
@@ -241,6 +247,7 @@ cases:
         enabled: true
       registry:
         enabled: true
+        driver: harbor
         harbor:
           sso: false
     expect:
@@ -279,6 +286,7 @@ cases:
         enabled: false
       registry:
         enabled: true
+        driver: harbor
     expect:
       flux:
         - name: registry
@@ -302,7 +310,8 @@ cases:
   # Harbor entirely. Add once windsorcli/core#2675 merges and republishes.
 
   # driver defaults to harbor, so leaving it unset still resolves.
-  - name: defaults the driver to harbor
+  # driver defaults to distribution — the cheap, anonymous option — not harbor.
+  - name: defaults the driver to distribution
     values:
       dev: true
       platform: metal
@@ -314,6 +323,68 @@ cases:
     expect:
       flux:
         - name: registry
+          dependsOn: []
+          install:
+            components:
+              - distribution
+              - distribution/pvc
+            substitutions:
+              registry_storage_class: single
+              registry_storage_size: 10Gi
+              registry_replicas: "1"
+    exclude:
+      flux:
+        - name: registry
+          install:
+            components:
+              - database
+              - harbor
+          resources:
+            - components:
+                - harbor/gateway
+
+  # A platform with its own object storage backs the distribution driver with a
+  # bucket instead of a PVC, same shape harbor's own object-store case uses.
+  - name: backs the distribution registry with an object-store bucket on hetzner
+    env:
+      HETZNER_S3_ACCESS_KEY: test-access
+      HETZNER_S3_SECRET_KEY: test-secret
+    values:
+      id: tst1
+      platform: hetzner
+      hetzner:
+        token: dummy-token
+        location: fsn1
+        network_zone: eu-central
+      network: *default-network
+      cluster: *default-cluster
+      gateway: *default-gateway
+      registry:
+        enabled: true
+    expect:
+      terraform:
+        - name: registry-distribution-object-store
+          path: object-store/hetzner
+          inputs:
+            location: fsn1
+            buckets:
+              - windsor-tst1-registry
+      flux:
+        - name: registry
+          install:
+            components:
+              - distribution
+              - distribution/s3
+            substitutions:
+              registry_bucket: windsor-tst1-registry
+              registry_region: fsn1
+              registry_endpoint: https://fsn1.your-objectstorage.com
+    exclude:
+      flux:
+        - name: registry
+          install:
+            components:
+              - distribution/pvc
 
   # Operator-supplied admin password flows through as the secret's value.
   - name: honors an explicit admin password
@@ -324,6 +395,7 @@ cases:
       gateway: *default-gateway
       registry:
         enabled: true
+        driver: harbor
         harbor:
           admin_password: supplied-by-operator
     expect:
@@ -343,6 +415,7 @@ cases:
       gateway: *default-gateway
       registry:
         enabled: true
+        driver: harbor
         harbor:
           admin_password: supplied-by-operator
           hostname: registry.fleet.example.com
@@ -371,6 +444,7 @@ cases:
       gateway: *default-gateway
       registry:
         enabled: true
+        driver: harbor
         harbor:
           admin_password: supplied-by-operator
     expect:
@@ -409,6 +483,7 @@ cases:
       gateway: *default-gateway
       registry:
         enabled: true
+        driver: harbor
         harbor:
           admin_password: supplied-by-operator
     expectError: true
@@ -426,6 +501,7 @@ cases:
       gateway: *default-gateway
       registry:
         enabled: true
+        driver: harbor
         harbor:
           admin_password: supplied-by-operator
     expect:
@@ -461,6 +537,7 @@ cases:
       gateway: *default-gateway
       registry:
         enabled: true
+        driver: harbor
         harbor:
           admin_password: supplied-by-operator
       database:
@@ -477,6 +554,7 @@ cases:
       gateway: *default-gateway
       registry:
         enabled: true
+        driver: harbor
     expectError: true
 
   # No gateway needed to install — Harbor still comes up (port-forward the harbor
@@ -490,6 +568,7 @@ cases:
         enabled: false
       registry:
         enabled: true
+        driver: harbor
         harbor:
           admin_password: supplied-by-operator
     expect:
@@ -526,6 +605,7 @@ cases:
           enabled: true
       registry:
         enabled: true
+        driver: harbor
         harbor:
           admin_password: supplied-by-operator
     expect:
@@ -555,6 +635,7 @@ cases:
           enabled: false
       registry:
         enabled: true
+        driver: harbor
         harbor:
           admin_password: supplied-by-operator
     expect:
@@ -586,6 +667,7 @@ cases:
       gateway: *default-gateway
       registry:
         enabled: true
+        driver: harbor
         harbor:
           admin_password: supplied-by-operator
     expect:
@@ -608,6 +690,7 @@ cases:
           enabled: true
       registry:
         enabled: true
+        driver: harbor
         harbor:
           admin_password: supplied-by-operator
     expect:
@@ -631,6 +714,7 @@ cases:
           enabled: false
       registry:
         enabled: true
+        driver: harbor
         harbor:
           admin_password: supplied-by-operator
     exclude:
@@ -653,6 +737,7 @@ cases:
           driver: none
       registry:
         enabled: true
+        driver: harbor
         harbor:
           admin_password: supplied-by-operator
     exclude:
