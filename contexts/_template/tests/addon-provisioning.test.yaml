@@ -391,7 +391,7 @@ cases:
     expect:
       terraform:
         - name: omni-account
-          path: ids/omni-account
+          path: provisioning/omni
       flux:
         - name: provisioning-base
           install:
@@ -475,6 +475,148 @@ cases:
           install:
             substitutions:
               omni_account_id: 550e8400-e29b-41d4-a716-446655440000
+
+  # =============================================================================
+  # Omni etcd backup — provisioning.omni.backup, bucket only for now
+  # =============================================================================
+
+  # Off by default: no bucket.
+  - name: omni backup stays off by default
+    values:
+      platform: metal
+      network: *default-network
+      cluster: *default-cluster
+      dns:
+        private_domain: cluster.local
+      identity:
+        enabled: true
+      provisioning:
+        enabled: true
+        omni: *default-omni
+    exclude:
+      terraform:
+        - name: omni-backup-object-store
+
+  # A separate, versioned bucket from the image factory's cache bucket.
+  - name: enabling backup provisions a dedicated versioned bucket on hetzner
+    env:
+      HETZNER_S3_ACCESS_KEY: test-access
+      HETZNER_S3_SECRET_KEY: test-secret
+    values:
+      id: tst1
+      platform: hetzner
+      hetzner:
+        token: dummy-token
+        location: fsn1
+        network_zone: eu-central
+      network: *default-network
+      cluster: *default-cluster
+      dns:
+        private_domain: cluster.local
+      identity:
+        enabled: true
+      provisioning:
+        enabled: true
+        image_factory:
+          enabled: false
+        omni:
+          <<: *default-omni
+          backup:
+            enabled: true
+    expect:
+      terraform:
+        - name: omni-backup-object-store
+          path: object-store/hetzner
+          inputs:
+            buckets:
+              - windsor-tst1-omni-backup
+            versioning: "true"
+            force_destroy: "false"
+
+  # Same shape as the hetzner case above; bucket creation needs no live Omni.
+  - name: enabling backup provisions a dedicated versioned bucket on aws
+    values:
+      id: tst1
+      platform: aws
+      network: *default-network
+      cluster: *default-cluster
+      dns:
+        private_domain: cluster.local
+      identity:
+        enabled: true
+      aws:
+        region: us-west-2
+      provisioning:
+        enabled: true
+        image_factory:
+          enabled: false
+        omni:
+          <<: *default-omni
+          backup:
+            enabled: true
+    expect:
+      terraform:
+        - name: omni-backup-object-store
+          path: object-store/aws
+          inputs:
+            buckets:
+              - windsor-tst1-omni-backup
+            versioning: "true"
+            force_destroy: "false"
+
+  # A throwaway context can opt out of the safety check.
+  - name: force_destroy can be opted into for a throwaway context
+    env:
+      HETZNER_S3_ACCESS_KEY: test-access
+      HETZNER_S3_SECRET_KEY: test-secret
+    values:
+      id: tst1
+      platform: hetzner
+      hetzner:
+        token: dummy-token
+        location: fsn1
+        network_zone: eu-central
+      network: *default-network
+      cluster: *default-cluster
+      dns:
+        private_domain: cluster.local
+      identity:
+        enabled: true
+      provisioning:
+        enabled: true
+        image_factory:
+          enabled: false
+        omni:
+          <<: *default-omni
+          backup:
+            enabled: true
+            force_destroy: true
+    expect:
+      terraform:
+        - name: omni-backup-object-store
+          inputs:
+            force_destroy: "true"
+
+  # minio and none have no bucket mechanism. Unlike the registry, there is no
+  # PVC fallback — this is a documented no-op.
+  - name: enabling backup on a driver with no bucket mechanism creates nothing
+    values:
+      platform: metal
+      network: *default-network
+      cluster: *default-cluster
+      dns:
+        private_domain: cluster.local
+      identity:
+        enabled: true
+      provisioning:
+        enabled: true
+        omni:
+          <<: *default-omni
+          backup:
+            enabled: true
+    exclude:
+      terraform:
+        - name: omni-backup-object-store
 
   # Explicit hostname override and a self-hosted image factory both flow through.
   - name: honors an explicit hostname and points at the self-hosted image factory

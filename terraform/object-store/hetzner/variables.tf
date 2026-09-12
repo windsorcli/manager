@@ -43,3 +43,9 @@ variable "force_destroy" {
   type        = bool
   default     = true
 }
+
+variable "versioning" {
+  description = "Keep object versions. Off by default: a cache of rebuildable artifacts does not need history, and versions accrue cost."
+  type        = bool
+  default     = false
+}

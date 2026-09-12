@@ -53,10 +53,19 @@ resource "aws_s3_bucket" "this" {
   # checkov:skip=CKV_AWS_144:Hetzner has no cross-region replication
   # checkov:skip=CKV_AWS_18:Hetzner has no access-logging target
   # checkov:skip=CKV2_AWS_6:Hetzner has no public access block API; buckets are private by default
-  # checkov:skip=CKV_AWS_21:Versioning is off deliberately; these hold rebuildable artifacts
+  # checkov:skip=CKV_AWS_21:Versioning is opt-in via var.versioning; a cache does not need history
   # checkov:skip=CKV2_AWS_61:A cache needs no lifecycle rules; the factory rewrites what it needs
   # checkov:skip=CKV2_AWS_62:Nothing consumes bucket events
   for_each      = toset(var.buckets)
   bucket        = each.value
   force_destroy = var.force_destroy
+}
+
+resource "aws_s3_bucket_versioning" "this" {
+  for_each = aws_s3_bucket.this
+  bucket   = each.value.id
+
+  versioning_configuration {
+    status = var.versioning ? "Enabled" : "Suspended"
+  }
 }
