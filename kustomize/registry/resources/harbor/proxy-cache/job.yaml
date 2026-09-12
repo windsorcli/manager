@@ -91,11 +91,11 @@ spec:
 
                 find_registry_id() {
                   curl -sf --connect-timeout 5 --max-time 15 -u "admin:$${HARBOR_ADMIN_PASSWORD}" -G \
-                    --data-urlencode "name=$${name}" "$${HARBOR}/api/v2.0/registries" \
-                    | jq -r --arg n "$${name}" '[.[] | select(.name == $n)][0].id // empty'
+                    --data-urlencode "name=$$1" "$${HARBOR}/api/v2.0/registries" \
+                    | jq -r --arg n "$$1" '[.[] | select(.name == $n)][0].id // empty'
                 }
 
-                reg_id=$(find_registry_id)
+                reg_id=$(find_registry_id "$${name}")
                 if [ -n "$${reg_id}" ]; then
                   echo "registry $${name} already registered ($${reg_id})"
                 else
@@ -118,7 +118,7 @@ spec:
                     exit 1
                   fi
                   echo "created registry $${name}"
-                  reg_id=$(find_registry_id)
+                  reg_id=$(find_registry_id "$${name}")
                   if [ -z "$${reg_id}" ]; then
                     echo "could not resolve registry id for $${name}" >&2
                     exit 1
