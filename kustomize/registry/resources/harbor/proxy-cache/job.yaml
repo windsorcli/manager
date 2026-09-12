@@ -23,6 +23,9 @@ spec:
         runAsNonRoot: true
         runAsUser: 1000
         runAsGroup: 1000
+        # Secret volumes are root-owned regardless of runAsUser; fsGroup is what
+        # makes the mounted file group-readable by this container's own user.
+        fsGroup: 1000
       volumes:
         - name: work
           emptyDir:
@@ -31,7 +34,7 @@ spec:
         - name: config
           secret:
             secretName: harbor-proxy-cache-config
-            defaultMode: 0400
+            defaultMode: 0440
       containers:
         - name: configure-proxy-cache
           # renovate: datasource=docker depName=kubectl package=alpine/k8s
