@@ -274,6 +274,23 @@ properties:
                 - url
               additionalProperties: false
             description: Proxy-cache projects Harbor creates for pull-through caching of upstream registries.
+          gc:
+            type: object
+            properties:
+              enabled:
+                type: boolean
+                default: true
+                description: Run Harbor's garbage collection on a schedule. Reclaims blobs no longer referenced by any tag.
+              schedule:
+                type: string
+                default: "0 0 2 * * *"
+                description: Cron expression for GC, 6 fields with seconds first (sec min hour day month weekday). Default is daily at 02:00.
+              delete_untagged:
+                type: boolean
+                default: false
+                description: Also delete untagged artifacts before reclaiming blobs, not just orphaned blobs under tagged artifacts.
+            additionalProperties: false
+            description: Harbor's own scheduled garbage collection.
         additionalProperties: false
     additionalProperties: false
     description: Self-hosted fleet container registry

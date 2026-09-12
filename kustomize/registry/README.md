@@ -58,6 +58,8 @@ Factory's own route already sets.
 | `oidc_issuer` | `harbor/oidc` | External OIDC discovery issuer, from `identity_effective.issuer`. |
 | `oidc_admin_group` | `harbor/oidc` | Keycloak group mapped to Harbor's admin role via the OIDC groups claim. Fixed at `platform-admins`. |
 | `oidc_verify_cert` | `harbor/oidc` | Whether Harbor verifies the identity provider's TLS certificate. False only in dev mode. |
+| `gc_schedule` | `harbor/gc` | Cron expression for Harbor's GC schedule, from `registry.harbor.gc.schedule`. 6 fields, seconds first. |
+| `gc_delete_untagged` | `harbor/gc` | Whether GC also deletes untagged artifacts, from `registry.harbor.gc.delete_untagged`. |
 
 ## Components
 
@@ -69,6 +71,7 @@ Factory's own route already sets.
 | `harbor/oidc` | `identity.enabled == true` and `registry.harbor.sso` is not explicitly false | Admin-API Job that registers Harbor's OIDC client in the platform realm and configures Harbor for OIDC auth, group-mapped to `platform-admins`. A named `oidc` resources variant of the `registry` flux system (`registry-resources-oidc`) so it depends on identity without gating Harbor's install or gateway route. |
 | `harbor/gateway` | `gateway.enabled == true` | HTTPRoute on Core's canonical `external` Gateway. Lives in the resources tier and depends on `gateway-resources`. Without a gateway, reach Harbor by port-forwarding the `harbor` Service in `registry`. |
 | `harbor/proxy-cache` | `registry.harbor.proxy_cache` has at least one entry | Admin-API Job that creates a Harbor Registry endpoint and proxy-cache Project for each configured upstream. A named `proxy-cache` resources variant of the `registry` flux system, depending only on Harbor's own install — unlike `harbor/oidc`, it has nothing to do with identity. |
+| `harbor/gc` | `registry.harbor.gc.enabled` is not explicitly false (default on) | Admin-API Job that sets Harbor's own GC schedule via its admin API. Harbor's jobservice runs GC on that schedule afterward; the Job only sets the schedule once. A named `gc` resources variant of the `registry` flux system, depending only on Harbor's own install. |
 
 ## Dependencies
 

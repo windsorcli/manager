@@ -1,0 +1,116 @@
+# Sets Harbor's own GC schedule via its admin API. Harbor's jobservice runs GC on that
+# schedule afterward; creates or updates the schedule, does not manage drift beyond that.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: harbor-gc
+  namespace: registry
+  annotations:
+    kustomize.toolkit.fluxcd.io/force: enabled
+spec:
+  backoffLimit: 20
+  ttlSecondsAfterFinished: 86400
+  activeDeadlineSeconds: 2400
+  template:
+    spec:
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+      volumes:
+        - name: work
+          emptyDir:
+            medium: Memory
+            sizeLimit: 1Mi
+      containers:
+        - name: configure-gc-schedule
+          # renovate: datasource=docker depName=kubectl package=alpine/k8s
+          image: alpine/k8s:1.37.0@sha256:b421c2e9419edb98db39b6ab641669f4db7bb2acf354f22450c6b7e7176d1ff4
+          volumeMounts:
+            - name: work
+              mountPath: /work
+          env:
+            - name: HOME
+              value: /work
+            - name: TMPDIR
+              value: /work
+            - name: HARBOR_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: harbor-admin-password
+                  key: HARBOR_ADMIN_PASSWORD
+          # $${...} are shell variables; ${...} are Windsor substitutions.
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -euo pipefail
+              umask 077
+              HARBOR="http://harbor.registry.svc.cluster.local"
+              desired_cron="${gc_schedule}"
+              desired_delete_untagged="${gc_delete_untagged}"
+
+              i=0
+              while :; do
+                if curl -sf --connect-timeout 5 --max-time 15 \
+                  -u "admin:$${HARBOR_ADMIN_PASSWORD}" \
+                  "$${HARBOR}/api/v2.0/systeminfo" >/dev/null 2>&1; then
+                  break
+                fi
+                i=$$((i + 1))
+                if [ "$${i}" -ge 120 ]; then
+                  echo "timed out waiting for the harbor api" >&2
+                  exit 1
+                fi
+                sleep 5
+              done
+
+              current=$(curl -sf --connect-timeout 5 --max-time 15 \
+                -u "admin:$${HARBOR_ADMIN_PASSWORD}" "$${HARBOR}/api/v2.0/system/gc/schedule")
+              # Harbor returns an empty 200 body, not '{}', when no schedule was ever set.
+              if [ -z "$${current}" ]; then
+                current='{}'
+              fi
+              current_type=$(echo "$${current}" | jq -r '.schedule.type // "None"')
+              current_cron=$(echo "$${current}" | jq -r '.schedule.cron // empty')
+              # job_parameters is a JSON string, not a nested object -- a second parse.
+              current_delete_untagged=$(echo "$${current}" \
+                | jq -r '(.job_parameters // "{}") | fromjson | .delete_untagged // false')
+
+              if [ "$${current_type}" = "Custom" ] \
+                && [ "$${current_cron}" = "$${desired_cron}" ] \
+                && [ "$${current_delete_untagged}" = "$${desired_delete_untagged}" ]; then
+                echo "gc schedule already set to '$${desired_cron}' (delete_untagged=$${desired_delete_untagged})"
+                exit 0
+              fi
+
+              body=$(jq -n --arg cron "$${desired_cron}" --argjson del "$${desired_delete_untagged}" \
+                '{schedule: {type: "Custom", cron: $cron}, parameters: {delete_untagged: $del}}')
+              method="PUT"
+              if [ "$${current_type}" = "None" ]; then
+                method="POST"
+              fi
+              http_code=$(curl -s -o /work/response -w '%{http_code}' \
+                --connect-timeout 5 --max-time 15 -u "admin:$${HARBOR_ADMIN_PASSWORD}" \
+                -X "$${method}" -H "Content-Type: application/json" -d "$${body}" \
+                "$${HARBOR}/api/v2.0/system/gc/schedule")
+              if [ "$${http_code}" -lt 200 ] || [ "$${http_code}" -ge 300 ]; then
+                echo "failed to set gc schedule (HTTP $${http_code}):" >&2
+                cat /work/response >&2
+                exit 1
+              fi
+              echo "gc schedule set to '$${desired_cron}' (delete_untagged=$${desired_delete_untagged})"
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 64Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+            seccompProfile:
+              type: RuntimeDefault
