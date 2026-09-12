@@ -33,11 +33,12 @@ requires:
 
 # =============================================================================
 # Terraform — cache signing key (image factory), account ID (omni), object-store
-# buckets (image factory's registry, on hetzner/aws)
+# buckets (image factory's registry and omni's backup destination, on hetzner/aws)
 # =============================================================================
 # The signing key and account ID are generated once and held in state, applied only
 # when the operator supplies no value of their own. Bucket provisioning only runs
-# where the platform's own object storage backs the registry.
+# where the platform's own object storage backs the registry. provisioning/omni also
+# holds Omni's etcd backup S3 config, commented out for now — see that module's README.
 terraform:
 
   - name: image-factory-signing-key
@@ -45,7 +46,7 @@ terraform:
     when: provisioning.image_factory.enabled == true && (provisioning.image_factory.cache_signing_key ?? '') == ''
 
   - name: omni-account
-    path: ids/omni-account
+    path: provisioning/omni
     when: (provisioning.enabled == true || provisioning.omni.enabled == true) && identity.enabled != false && (provisioning.omni.account_id ?? '') == ''
 
   - name: image-factory-object-store
@@ -68,6 +69,29 @@ terraform:
       region: ${aws.region}
       buckets:
         - "${object_store.prefix}-image-factory"
+
+  - name: omni-backup-object-store
+    path: object-store/hetzner
+    when: object_store.driver == 'hetzner' && provisioning.omni.backup.enabled == true
+    inputs:
+      access_key: ${hetzner.object_storage.access_key ?? env("HETZNER_S3_ACCESS_KEY")}
+      secret_key: ${hetzner.object_storage.secret_key ?? env("HETZNER_S3_SECRET_KEY")}
+      location: "${hetzner.object_storage.location ?? 'fsn1'}"
+      # Backups, not a rebuildable cache — keeps version history.
+      force_destroy: "${provisioning.omni.backup.force_destroy ?? false}"
+      versioning: true
+      buckets:
+        - "${object_store.prefix}-omni-backup"
+
+  - name: omni-backup-object-store
+    path: object-store/aws
+    when: object_store.driver == 'aws' && provisioning.omni.backup.enabled == true
+    inputs:
+      region: ${aws.region}
+      force_destroy: "${provisioning.omni.backup.force_destroy ?? false}"
+      versioning: true
+      buckets:
+        - "${object_store.prefix}-omni-backup"
 
 config:
   # provisioning.enabled turns on identity and the image factory too.

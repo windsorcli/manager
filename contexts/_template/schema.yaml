@@ -180,6 +180,19 @@ properties:
             type: string
             sensitive: true
             description: Base64-encoded Omni service account key for the omni_exporter Deployment (client.WithServiceAccount). Nothing in this repo can create it — Omni has no non-interactive bootstrap credential, only SAML/WebAuthn/Auth0 login, so an admin has to log in once and run `omnictl serviceaccount create --use-user-role=false --role=Reader omni-exporter`, then set this via a secret() reference. Unset leaves the exporter Deployment out entirely; nothing else in this facet depends on it.
+          backup:
+            type: object
+            properties:
+              enabled:
+                type: boolean
+                default: false
+                description: Provision an S3 bucket for Omni's etcd backups. Works only on object_store.driver hetzner or aws. Pointing Omni at the bucket needs a terraform-provider-omni release that does not exist yet.
+              force_destroy:
+                type: boolean
+                default: false
+                description: Delete the backup bucket's contents on teardown. Off by default, so teardown blocks until an operator empties the bucket by hand.
+            additionalProperties: false
+            description: Off-cluster S3 destination bucket for Omni's etcd backups.
         additionalProperties: false
         description: Self-hosted Sidero Omni fleet control plane
     additionalProperties: false

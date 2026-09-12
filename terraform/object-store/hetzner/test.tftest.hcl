@@ -57,3 +57,32 @@ run "buckets_are_destroyable_by_default" {
     error_message = "Buckets must be destroyable without emptying them first."
   }
 }
+
+run "versioning_is_off_by_default" {
+  command = plan
+
+  variables {
+    location = "fsn1"
+    buckets  = ["windsor-test-image-factory"]
+  }
+
+  assert {
+    condition     = alltrue([for v in aws_s3_bucket_versioning.this : v.versioning_configuration[0].status == "Suspended"])
+    error_message = "Versioning must be off by default."
+  }
+}
+
+run "versioning_can_be_enabled" {
+  command = plan
+
+  variables {
+    location   = "fsn1"
+    buckets    = ["windsor-test-omni-backup"]
+    versioning = true
+  }
+
+  assert {
+    condition     = alltrue([for v in aws_s3_bucket_versioning.this : v.versioning_configuration[0].status == "Enabled"])
+    error_message = "Versioning must be enabled when requested."
+  }
+}

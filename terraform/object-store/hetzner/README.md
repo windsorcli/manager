@@ -23,13 +23,13 @@ tags would make every apply fail. Buckets carry ownership in their name prefix i
 | Name | Version |
 |------|---------|
 | <a name="requirement_terraform"></a> [terraform](#requirement\_terraform) | >= 1.12.2 |
-| <a name="requirement_aws"></a> [aws](#requirement\_aws) | 6.52.0 |
+| <a name="requirement_aws"></a> [aws](#requirement\_aws) | 6.64.0 |
 
 ## Providers
 
 | Name | Version |
 |------|---------|
-| <a name="provider_aws"></a> [aws](#provider\_aws) | 6.52.0 |
+| <a name="provider_aws"></a> [aws](#provider\_aws) | 6.64.0 |
 
 ## Modules
 
@@ -39,7 +39,8 @@ No modules.
 
 | Name | Type |
 |------|------|
-| [aws_s3_bucket.this](https://registry.terraform.io/providers/hashicorp/aws/6.52.0/docs/resources/s3_bucket) | resource |
+| [aws_s3_bucket.this](https://registry.terraform.io/providers/hashicorp/aws/6.64.0/docs/resources/s3_bucket) | resource |
+| [aws_s3_bucket_versioning.this](https://registry.terraform.io/providers/hashicorp/aws/6.64.0/docs/resources/s3_bucket_versioning) | resource |
 
 ## Inputs
 
@@ -50,6 +51,7 @@ No modules.
 | <a name="input_force_destroy"></a> [force\_destroy](#input\_force\_destroy) | Delete remaining objects when the bucket is destroyed. On by default: these buckets hold rebuildable artifacts, and a non-empty bucket otherwise blocks teardown. | `bool` | `true` | no |
 | <a name="input_location"></a> [location](#input\_location) | Hetzner location hosting the buckets. Object Storage runs in fsn1, nbg1, and hel1 only, not in the ash, hil, or sin compute locations. | `string` | `"fsn1"` | no |
 | <a name="input_secret_key"></a> [secret\_key](#input\_secret\_key) | S3 secret key paired with access\_key. | `string` | n/a | yes |
+| <a name="input_versioning"></a> [versioning](#input\_versioning) | Keep object versions. Off by default: a cache of rebuildable artifacts does not need history, and versions accrue cost. | `bool` | `false` | no |
 
 ## Outputs
 
