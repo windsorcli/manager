@@ -73,8 +73,13 @@ cases:
         - name: image-factory-signing-key
           path: keys/signing
       flux:
+        - name: provisioning-base
+          install:
+            components:
+              - namespace
         - name: image-factory
           dependsOn:
+            - provisioning-base-install
             - pki-install
             - gateway-install
           install:
@@ -114,6 +119,7 @@ cases:
       flux:
         - name: image-factory
           dependsOn:
+            - provisioning-base-install
             - pki-install
             - gateway-install
           install:
@@ -321,6 +327,7 @@ cases:
       flux:
         - name: image-factory
           dependsOn:
+            - provisioning-base-install
             - pki-install
           install:
             components:
@@ -386,7 +393,13 @@ cases:
         - name: omni-account
           path: ids/omni-account
       flux:
+        - name: provisioning-base
+          install:
+            components:
+              - namespace
         - name: omni
+          dependsOn:
+            - provisioning-base-install
           install:
             components:
               - omni
@@ -1006,6 +1019,27 @@ cases:
     exclude:
       flux:
         - name: image-factory
+
+  # provisioning-base only exists to back image-factory-install/omni-install; opting
+  # both out of the fan-out must leave it out too, not just its two consumers.
+  - name: opting out of both halves leaves provisioning-base out too
+    values:
+      id: tst1
+      platform: metal
+      network: *default-network
+      cluster: *default-cluster
+      gateway: *default-gateway
+      provisioning:
+        enabled: true
+        image_factory:
+          enabled: false
+      identity:
+        enabled: false
+    exclude:
+      flux:
+        - name: provisioning-base
+        - name: image-factory
+        - name: omni
 
   # =============================================================================
   # provisioning.object_store resolution

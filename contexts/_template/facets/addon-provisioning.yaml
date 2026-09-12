@@ -183,18 +183,25 @@ config:
 # =============================================================================
 # Flux systems — image factory, omni
 # =============================================================================
-# Both kustomizations point at kustomize/provisioning (path: below): pki-install issues
-# the TLS certificate and gateway-install supplies the route CRDs for image-factory;
-# identity-resources gives omni its SAML realm to register against. Every namespace,
-# HelmRelease, and conditional add-on lives under kustomize/provisioning — see its
-# README for the full component/dependency tables.
+# All three point at kustomize/provisioning; see its README for the full component/dependency tables.
 #
 flux:
+
+  # Owns the shared Namespace/HelmRepository; image-factory-install and omni-install depend on it.
+  - name: provisioning-base
+    when: provisioning.image_factory.enabled == true || ((provisioning.enabled == true || provisioning.omni.enabled == true) && identity.enabled != false)
+    path: provisioning
+    install:
+      components:
+        - namespace
+      timeout: 5m
+      interval: 5m
 
   - name: image-factory
     when: provisioning.image_factory.enabled == true
     path: provisioning
     dependsOn:
+      - provisioning-base-install
       - pki-install
       - "${gateway.enabled == true ? 'gateway-install' : ''}"
     # The chart reads the key from the data key `cache-signing.key`.
@@ -281,6 +288,8 @@ flux:
   - name: omni
     when: (provisioning.enabled == true || provisioning.omni.enabled == true) && identity.enabled != false
     path: provisioning
+    dependsOn:
+      - provisioning-base-install
     secrets:
       omni-etcd-encryption-key:
         data:
