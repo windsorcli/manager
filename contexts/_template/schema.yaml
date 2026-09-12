@@ -232,6 +232,48 @@ properties:
             type: boolean
             default: true
             description: Sign in to Harbor via Core's identity (SSO). Active when identity is enabled; set false to keep Harbor on local-admin auth.
+          proxy_cache:
+            type: array
+            default: []
+            items:
+              type: object
+              properties:
+                name:
+                  type: string
+                  description: Harbor project name for this proxy cache, e.g. docker-hub.
+                registry_type:
+                  type: string
+                  enum:
+                    - docker-hub
+                    - docker-registry
+                    - github-ghcr
+                    - quay
+                    - google-gcr
+                    - aws-ecr
+                    - azure-acr
+                    - jfrog-artifactory
+                    - harbor
+                  description: Upstream registry provider Harbor pulls through.
+                url:
+                  type: string
+                  description: Upstream registry URL, e.g. https://registry-1.docker.io.
+                username:
+                  type: string
+                  description: Optional upstream credential username. Anonymous pull if unset.
+                password:
+                  type: string
+                  sensitive: true
+                  description: Optional upstream credential password or token. Set via a secret() reference.
+                public:
+                  type: boolean
+                  default: false
+                  description: Let any signed-in user pull from this project without a role grant.
+              required:
+                - name
+                - registry_type
+                - url
+              additionalProperties: false
+            description: Proxy-cache projects Harbor creates for pull-through caching of upstream registries.
         additionalProperties: false
     additionalProperties: false
     description: Self-hosted fleet container registry

@@ -1,6 +1,6 @@
 ---
 title: "ADR-0008: Harbor — a fleet registry, not another bare distribution cache"
-description: "Image Factory's own facet already names the gap it's working around: its in-cluster registry is a bare `distribution` cache with no scanning, no RBAC, no UI, and no replication, and its docs say plainly that once Manager's Harbor lands, the factory points at it instead. This ADR picks Harbor (the official `goharbor/harbor-helm` chart) as that fleet-wide registry, deployed the same way every other stateful addon in this repo is: a dedicated CloudNativePG Postgres Cluster (Keycloak's own precedent, not the chart's bundled database), object_store-backed S3 storage in its own bucket (not shared with Image Factory's), the chart's bundled Redis (no shared-Redis precedent exists to build on, and Redis holds nothing that needs to survive a restart), and exposure through the shared gateway. SSO against Core's Keycloak realm ships alongside the initial deployment, wired through an admin-API Job the same shape Omni's own SAML client registration uses (Harbor has no CRD/values-level OIDC). Deferred: proxy-cache projects for the reduced-egress/air-gapped motivation, migrating Image Factory's own registry onto Harbor, and scheduled garbage collection — each waits on Harbor being proven reachable and authenticated first, the same phasing discipline ADR-0004 used for Omni."
+description: "Image Factory's own facet already names the gap it's working around: its in-cluster registry is a bare `distribution` cache with no scanning, no RBAC, no UI, and no replication, and its docs say plainly that once Manager's Harbor lands, the factory points at it instead. This ADR picks Harbor (the official `goharbor/harbor-helm` chart) as that fleet-wide registry, deployed the same way every other stateful addon in this repo is: a dedicated CloudNativePG Postgres Cluster (Keycloak's own precedent, not the chart's bundled database), object_store-backed S3 storage in its own bucket (not shared with Image Factory's), the chart's bundled Redis (no shared-Redis precedent exists to build on, and Redis holds nothing that needs to survive a restart), and exposure through the shared gateway. SSO against Core's Keycloak realm ships alongside the initial deployment, wired through an admin-API Job the same shape Omni's own SAML client registration uses (Harbor has no CRD/values-level OIDC). Deferred: migrating Image Factory's own registry onto Harbor, and scheduled garbage collection — each waits on Harbor being proven reachable and authenticated first, the same phasing discipline ADR-0004 used for Omni. Proxy-cache projects (the reduced-egress/air-gapped motivation) are now built — see the update below."
 ---
 
 # ADR-0008: Harbor — a fleet registry, not another bare distribution cache
@@ -52,6 +52,14 @@ migrated onto Harbor, and scheduled garbage collection — each waits on Harbor 
 reachable and authenticated first. This is the same phasing discipline ADR-0004 used for
 Omni —
 land the reachable thing, defer what depends on it being proven — not a new pattern.
+
+**Update: proxy-cache projects, built.** `registry.harbor.proxy_cache` creates a Harbor
+Registry endpoint plus a proxy-cache Project for each configured upstream, via an
+admin-API Job the same shape `harbor/oidc` uses (create what's missing, no drift
+management). Confirmed against the pinned chart's Harbor version (2.15.2, chart 1.19.2)
+directly in `goharbor/harbor`'s own source: `github-ghcr` is a first-class adapter
+(`src/pkg/reg/adapter/githubcr`), resolving the doubt the original Consequences section
+raised below.
 
 The schema is `registry.enabled` / `registry.driver` (default `harbor`) /
 `registry.harbor.*`, not a flat `harbor.*` key — capability-plus-driver, the same shape
@@ -162,11 +170,10 @@ secret in this repo is — SSO adds a second login path, it doesn't replace the 
 - The CNPG CA-trust gap in decision 2 means Harbor's database connection may ship without
   full TLS certificate verification — flagged explicitly so it isn't silently
   carried forward as if it were resolved.
-- The still-deferred proxy-cache motivation (mirroring `ghcr.io`/`docker.io` for downstream clusters)
-  depends on Harbor's own per-registry-provider support; native `ghcr.io` proxy-cache support
-  is community-reported working, not officially documented — that work needs to confirm this
-  against the pinned Harbor version before downstream clusters are pointed at it, not assume
-  it from this ADR.
+- Resolved by the update above: `github-ghcr` is a native, first-class Harbor adapter at
+  the pinned chart version, not a community workaround. Downstream clusters still have to
+  be pointed at the resulting proxy-cache project themselves — this ADR only gets Harbor
+  ready to serve one.
 - ADR-0007 (Manager's own state, not yet written) now has a second Postgres Cluster and a
   second bucket to account for, alongside Omni's etcd and the identity database.
 
