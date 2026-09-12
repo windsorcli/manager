@@ -54,6 +54,9 @@ components:
   harbor/gateway:
     enable_when: "`gateway.enabled == true`"
     description: "HTTPRoute on Core's canonical `external` Gateway. Lives in the resources tier and depends on `gateway-resources`. Without a gateway, reach Harbor by port-forwarding the `harbor` Service in `registry`."
+  harbor/proxy-cache:
+    enable_when: "`registry.harbor.proxy_cache` has at least one entry"
+    description: "Admin-API Job that creates a Harbor Registry endpoint and proxy-cache Project for each configured upstream. A named `proxy-cache` resources variant of the `registry` flux system, depending only on Harbor's own install — unlike `harbor/oidc`, it has nothing to do with identity."
 
 dependencies:
   pki:

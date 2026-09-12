@@ -68,6 +68,7 @@ Factory's own route already sets.
 | `harbor/s3` | `object_store.driver` is `hetzner` or `aws` | Backs the registry with a bucket from the platform's object store instead of a PVC. Own bucket, own destroy policy — not shared with image-factory's. |
 | `harbor/oidc` | `identity.enabled == true` and `registry.harbor.sso` is not explicitly false | Admin-API Job that registers Harbor's OIDC client in the platform realm and configures Harbor for OIDC auth, group-mapped to `platform-admins`. A named `oidc` resources variant of the `registry` flux system (`registry-resources-oidc`) so it depends on identity without gating Harbor's install or gateway route. |
 | `harbor/gateway` | `gateway.enabled == true` | HTTPRoute on Core's canonical `external` Gateway. Lives in the resources tier and depends on `gateway-resources`. Without a gateway, reach Harbor by port-forwarding the `harbor` Service in `registry`. |
+| `harbor/proxy-cache` | `registry.harbor.proxy_cache` has at least one entry | Admin-API Job that creates a Harbor Registry endpoint and proxy-cache Project for each configured upstream. A named `proxy-cache` resources variant of the `registry` flux system, depending only on Harbor's own install — unlike `harbor/oidc`, it has nothing to do with identity. |
 
 ## Dependencies
 

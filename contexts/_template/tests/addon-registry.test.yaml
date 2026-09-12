@@ -67,6 +67,39 @@ cases:
         database:
           postgres:
             enabled: true
+    exclude:
+      flux:
+        - name: registry
+          resources:
+            - components:
+                - harbor/proxy-cache
+
+  # A configured proxy_cache entry adds a named resources variant that only needs
+  # Harbor's own install, not identity — unlike oidc, it has nothing to do with SSO.
+  - name: adds a proxy cache project when one is configured
+    values:
+      dev: true
+      platform: metal
+      network: *default-network
+      cluster: *default-cluster
+      gateway: *default-gateway
+      registry:
+        enabled: true
+        harbor:
+          proxy_cache:
+            - name: docker-hub
+              registry_type: docker-hub
+              url: https://registry-1.docker.io
+              public: true
+    expect:
+      flux:
+        - name: registry
+          resources:
+            - name: proxy-cache
+              dependsOn:
+                - registry-install
+              components:
+                - harbor/proxy-cache
 
   # SSO rides on identity: enabling it adds a named oidc resources variant. Harbor's own
   # install keeps its dependencies free of identity so its route comes up regardless.

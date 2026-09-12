@@ -98,6 +98,10 @@ flux:
         data:
           REGISTRY_STORAGE_S3_ACCESSKEY: ${hetzner.object_storage.access_key ?? env("HETZNER_S3_ACCESS_KEY") ?? ''}
           REGISTRY_STORAGE_S3_SECRETKEY: ${hetzner.object_storage.secret_key ?? env("HETZNER_S3_SECRET_KEY") ?? ''}
+      # A Secret, not a ConfigMap, since entries may carry upstream credentials.
+      harbor-proxy-cache-config:
+        data:
+          proxy-cache.yaml: ${yamlString(registry.harbor.proxy_cache ?? [])}
     install:
       components:
         - database
@@ -150,6 +154,18 @@ flux:
           oidc_verify_cert: "${dev == true ? false : true}"
         # At least the Job's own activeDeadlineSeconds (40m) — a shorter Flux
         # timeout would give up before Kubernetes ever kills the Job itself.
+        timeout: 40m
+        interval: 5m
+
+      # Proxy-cache projects. A resources variant, not an install component, for the
+      # same reason oidc is: it needs Harbor's own API up, not just the chart applied.
+      - name: proxy-cache
+        when: len(registry.harbor.proxy_cache ?? []) > 0
+        dependsOn:
+          - registry-install
+        components:
+          - harbor/proxy-cache
+        # At least the Job's own activeDeadlineSeconds (40m).
         timeout: 40m
         interval: 5m
 

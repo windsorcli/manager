@@ -1,0 +1,163 @@
+# Creates a Harbor Registry endpoint and a proxy-cache Project for each entry in
+# registry.harbor.proxy_cache. Creates what is missing; does not manage drift
+# afterward, the same posture harbor/oidc uses for the OIDC client it registers.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: harbor-proxy-cache
+  namespace: registry
+  annotations:
+    kustomize.toolkit.fluxcd.io/force: enabled
+spec:
+  # Each retry re-runs the full internal wait loop (600s) from scratch, so this
+  # absorbs a genuinely slow Harbor cold start, not just container crashes.
+  backoffLimit: 20
+  ttlSecondsAfterFinished: 86400
+  # Bounds the whole Job across every retry, not just one internal wait loop
+  # (120 x 5s = 600s) — same budget harbor/oidc uses for its own longer wait.
+  activeDeadlineSeconds: 2400
+  template:
+    spec:
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        # Secret volumes are root-owned regardless of runAsUser; fsGroup is what
+        # makes the mounted file group-readable by this container's own user.
+        fsGroup: 1000
+      volumes:
+        - name: work
+          emptyDir:
+            medium: Memory
+            sizeLimit: 1Mi
+        - name: config
+          secret:
+            secretName: harbor-proxy-cache-config
+            defaultMode: 0440
+      containers:
+        - name: configure-proxy-cache
+          # renovate: datasource=docker depName=kubectl package=alpine/k8s
+          image: alpine/k8s:1.37.0@sha256:b421c2e9419edb98db39b6ab641669f4db7bb2acf354f22450c6b7e7176d1ff4
+          volumeMounts:
+            - name: work
+              mountPath: /work
+            - name: config
+              mountPath: /config
+              readOnly: true
+          env:
+            - name: HOME
+              value: /work
+            - name: TMPDIR
+              value: /work
+            - name: HARBOR_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: harbor-admin-password
+                  key: HARBOR_ADMIN_PASSWORD
+          # $${...} are shell variables; ${...} are Windsor substitutions.
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -euo pipefail
+              umask 077
+              # In-cluster Harbor API through its nginx front (the `harbor` Service, :80).
+              HARBOR="http://harbor.registry.svc.cluster.local"
+
+              i=0
+              while :; do
+                if curl -sf --connect-timeout 5 --max-time 15 \
+                  -u "admin:$${HARBOR_ADMIN_PASSWORD}" \
+                  "$${HARBOR}/api/v2.0/systeminfo" >/dev/null 2>&1; then
+                  break
+                fi
+                i=$$((i + 1))
+                if [ "$${i}" -ge 120 ]; then
+                  echo "timed out waiting for the harbor api" >&2
+                  exit 1
+                fi
+                sleep 5
+              done
+
+              yq -o=json /config/proxy-cache.yaml > /work/proxy-cache.json
+
+              jq -c '.[]' /work/proxy-cache.json | while IFS= read -r entry; do
+                name=$(echo "$${entry}" | jq -r '.name')
+                reg_type=$(echo "$${entry}" | jq -r '.registry_type')
+                url=$(echo "$${entry}" | jq -r '.url')
+                public=$(echo "$${entry}" | jq -r '.public // false')
+                username=$(echo "$${entry}" | jq -r '.username // empty')
+                password=$(echo "$${entry}" | jq -r '.password // empty')
+
+                find_registry_id() {
+                  curl -sf --connect-timeout 5 --max-time 15 -u "admin:$${HARBOR_ADMIN_PASSWORD}" -G \
+                    --data-urlencode "name=$$1" "$${HARBOR}/api/v2.0/registries" \
+                    | jq -r --arg n "$$1" '[.[] | select(.name == $n)][0].id // empty'
+                }
+
+                reg_id=$(find_registry_id "$${name}")
+                if [ -n "$${reg_id}" ]; then
+                  echo "registry $${name} already registered ($${reg_id})"
+                else
+                  if [ -n "$${username}" ] && [ -n "$${password}" ]; then
+                    credential=$(jq -n --arg u "$${username}" --arg p "$${password}" \
+                      '{type: "basic", access_key: $u, access_secret: $p}')
+                  else
+                    credential='{"type":"basic","access_key":"","access_secret":""}'
+                  fi
+                  body=$(jq -n --arg name "$${name}" --arg url "$${url}" --arg type "$${reg_type}" \
+                    --argjson credential "$${credential}" \
+                    '{name: $name, url: $url, type: $type, credential: $credential}')
+                  http_code=$(curl -s -o /work/create-registry-response -w '%{http_code}' \
+                    --connect-timeout 5 --max-time 15 -u "admin:$${HARBOR_ADMIN_PASSWORD}" \
+                    -X POST -H "Content-Type: application/json" -d "$${body}" \
+                    "$${HARBOR}/api/v2.0/registries")
+                  if [ "$${http_code}" -lt 200 ] || [ "$${http_code}" -ge 300 ]; then
+                    echo "failed to create registry $${name} (HTTP $${http_code}):" >&2
+                    cat /work/create-registry-response >&2
+                    exit 1
+                  fi
+                  echo "created registry $${name}"
+                  reg_id=$(find_registry_id "$${name}")
+                  if [ -z "$${reg_id}" ]; then
+                    echo "could not resolve registry id for $${name}" >&2
+                    exit 1
+                  fi
+                fi
+
+                project_count=$(curl -sf --connect-timeout 5 --max-time 15 \
+                  -u "admin:$${HARBOR_ADMIN_PASSWORD}" -G \
+                  --data-urlencode "name=$${name}" "$${HARBOR}/api/v2.0/projects" \
+                  | jq -r --arg n "$${name}" '[.[] | select(.name == $n)] | length')
+                if [ "$${project_count}" != "0" ]; then
+                  echo "proxy cache project $${name} already exists"
+                  continue
+                fi
+
+                body=$(jq -n --arg name "$${name}" --argjson registry_id "$${reg_id}" --arg pub "$${public}" \
+                  '{project_name: $name, registry_id: $registry_id, metadata: {public: $pub}}')
+                http_code=$(curl -s -o /work/create-project-response -w '%{http_code}' \
+                  --connect-timeout 5 --max-time 15 -u "admin:$${HARBOR_ADMIN_PASSWORD}" \
+                  -X POST -H "Content-Type: application/json" -d "$${body}" \
+                  "$${HARBOR}/api/v2.0/projects")
+                if [ "$${http_code}" -lt 200 ] || [ "$${http_code}" -ge 300 ]; then
+                  echo "failed to create proxy cache project $${name} (HTTP $${http_code}):" >&2
+                  cat /work/create-project-response >&2
+                  exit 1
+                fi
+                echo "created proxy cache project $${name}"
+              done
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 64Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+            seccompProfile:
+              type: RuntimeDefault
