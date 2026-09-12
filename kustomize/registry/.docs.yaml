@@ -37,6 +37,12 @@ substitutions:
   oidc_verify_cert:
     required_when: "`harbor/oidc`"
     description: "Whether Harbor verifies the identity provider's TLS certificate. False only in dev mode."
+  gc_schedule:
+    required_when: "`harbor/gc`"
+    description: "Cron expression for Harbor's GC schedule, from `registry.harbor.gc.schedule`. 6 fields, seconds first."
+  gc_delete_untagged:
+    required_when: "`harbor/gc`"
+    description: "Whether GC also deletes untagged artifacts, from `registry.harbor.gc.delete_untagged`."
 
 components:
   database:
@@ -57,6 +63,9 @@ components:
   harbor/proxy-cache:
     enable_when: "`registry.harbor.proxy_cache` has at least one entry"
     description: "Admin-API Job that creates a Harbor Registry endpoint and proxy-cache Project for each configured upstream. A named `proxy-cache` resources variant of the `registry` flux system, depending only on Harbor's own install — unlike `harbor/oidc`, it has nothing to do with identity."
+  harbor/gc:
+    enable_when: "`registry.harbor.gc.enabled` is not explicitly false (default on)"
+    description: "Admin-API Job that sets Harbor's own GC schedule via its admin API. Harbor's jobservice runs GC on that schedule afterward; the Job only sets the schedule once. A named `gc` resources variant of the `registry` flux system, depending only on Harbor's own install."
 
 dependencies:
   pki:

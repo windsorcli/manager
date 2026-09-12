@@ -1,8 +1,8 @@
 # addon-registry.yaml facet tests
 # Covers the enabled/disabled gate, the required admin password and gateway, the
 # database fan-on, storage landing on a PVC vs an object-store bucket, the terraform
-# bucket provisioning on hetzner/aws, the SSO wiring, and the metrics/log-filter
-# observability contributions.
+# bucket provisioning on hetzner/aws, the SSO wiring, the GC schedule, and the
+# metrics/log-filter observability contributions.
 
 x-defaults:
   network: &default-network
@@ -63,6 +63,14 @@ cases:
                 - gateway-resources
               components:
                 - harbor/gateway
+            - name: gc
+              dependsOn:
+                - registry-install
+              components:
+                - harbor/gc
+              substitutions:
+                gc_schedule: "0 0 2 * * *"
+                gc_delete_untagged: "false"
       config:
         database:
           postgres:
@@ -100,6 +108,60 @@ cases:
                 - registry-install
               components:
                 - harbor/proxy-cache
+
+  # An explicit schedule/delete_untagged override flows through the gc resources variant's
+  # own substitutions.
+  - name: sets a custom gc schedule
+    values:
+      dev: true
+      platform: metal
+      network: *default-network
+      cluster: *default-cluster
+      gateway: *default-gateway
+      registry:
+        enabled: true
+        harbor:
+          gc:
+            schedule: "0 0 4 * * 0"
+            delete_untagged: true
+    expect:
+      flux:
+        - name: registry
+          resources:
+            - name: gc
+              components:
+                - harbor/gc
+              substitutions:
+                gc_schedule: "0 0 4 * * 0"
+                gc_delete_untagged: "true"
+
+  # gc.enabled: false is the only way to keep the schedule off — unlike sso, there's no
+  # other condition (identity, gateway) it rides on.
+  - name: leaves gc out when disabled
+    values:
+      dev: true
+      platform: metal
+      network: *default-network
+      cluster: *default-cluster
+      gateway: *default-gateway
+      registry:
+        enabled: true
+        harbor:
+          gc:
+            enabled: false
+    expect:
+      flux:
+        - name: registry
+          install:
+            components:
+              - database
+              - harbor
+    exclude:
+      flux:
+        - name: registry
+          resources:
+            - components:
+                - harbor/gc
 
   # SSO rides on identity: enabling it adds a named oidc resources variant. Harbor's own
   # install keeps its dependencies free of identity so its route comes up regardless.
@@ -440,7 +502,10 @@ cases:
             components:
               - database
               - harbor
-          resources: []
+          resources:
+            - name: gc
+              components:
+                - harbor/gc
     exclude:
       flux:
         - name: registry

@@ -73,6 +73,7 @@ config:
       # Also needs the gateway: the redirect URI it registers is the hosted server's
       # gateway URL, and Harbor's own route is equally unreachable without one.
       sso: ${identity.enabled == true && (identity.driver ?? 'keycloak') == 'keycloak' && gateway.enabled == true && (registry.harbor.sso ?? true) != false}
+      gc: ${(registry.harbor.gc.enabled ?? true) != false}
 
 # =============================================================================
 # Flux system — Harbor
@@ -165,6 +166,20 @@ flux:
           - registry-install
         components:
           - harbor/proxy-cache
+        # At least the Job's own activeDeadlineSeconds (40m).
+        timeout: 40m
+        interval: 5m
+
+      # Sets Harbor's own GC schedule once; Harbor's jobservice runs it from then on.
+      - name: gc
+        when: harbor_effective.gc == true
+        dependsOn:
+          - registry-install
+        components:
+          - harbor/gc
+        substitutions:
+          gc_schedule: "${registry.harbor.gc.schedule ?? '0 0 2 * * *'}"
+          gc_delete_untagged: "${registry.harbor.gc.delete_untagged ?? false}"
         # At least the Job's own activeDeadlineSeconds (40m).
         timeout: 40m
         interval: 5m
