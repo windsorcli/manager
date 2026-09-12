@@ -1,9 +1,12 @@
 apiVersion: apps/v1
-kind: Deployment
+kind: StatefulSet
 metadata:
   name: registry
   namespace: provisioning
 spec:
+  # Not headless: nothing here needs per-pod DNS, and clusterIP is immutable on an
+  # existing Service.
+  serviceName: registry
   replicas: ${registry_replicas:-1}
   selector:
     matchLabels:

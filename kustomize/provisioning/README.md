@@ -157,12 +157,18 @@ operator's browser use this same URL.
 | `keycloak_saml_url` | always | Identity's SAML descriptor URL Omni's chart fetches server-side at startup. |
 | `keycloak_realm` | always | Identity realm Omni's SAML client registers against. |
 
+## Components — `shared`
+
+| Component | Enable when | Effect |
+|---|---|---|
+| `namespace` | always | The `provisioning` Namespace and the shared `siderolabs` HelmRepository. |
+
 ## Components — `image-factory`
 
 | Component | Enable when | Effect |
 |---|---|---|
 | `registry` | no external schematic registry is named | In-cluster OCI registry (`distribution`) holding schematics and cached boot assets. Reached at `registry.provisioning.svc.cluster.local:5000` over plain HTTP; no route, and a NetworkPolicy admits only the factory pod on 5000. |
-| `registry/pvc` | `object_store.driver` is neither `hetzner` nor `aws` | Backs the registry with a PersistentVolumeClaim on the default storage class. Without it the registry is an emptyDir, and a restart loses every schematic id already handed out. |
+| `registry/pvc` | `object_store.driver` is neither `hetzner` nor `aws` | Backs the registry with a volumeClaimTemplate on the default storage class, in place of its default emptyDir. Without it a restart loses every schematic id already handed out. |
 | `registry/s3` | `object_store.driver` is `hetzner` or `aws` | Backs the registry with a bucket from the platform's object store instead of a volume. Limited to the platforms the registry holds credentials for: Hetzner keys come from `hetzner.object_storage`, and on AWS an empty key pair leaves the S3 driver on the instance credential chain. A minio object store stays on a PVC until credentials for one exist. |
 | `image-factory` | `provisioning.image_factory.enabled == true` | Helm release of the Sidero Labs `image-factory` chart in `provisioning`, from `oci://ghcr.io/siderolabs/charts`. Serves the UI, API, and registry frontends on :8080. Runs as uid 1000, non-root, baseline PSA-compatible. The chart supports only the Recreate deployment strategy. |
 | `image-factory/ha` | `topology == 'ha'` | Two replicas with pod anti-affinity across nodes. Redundancy against node loss only — the Recreate strategy means rollouts still have a gap. Safe because builds are stateless: schematics live in the registry, cached assets in the cache backend. |
@@ -186,6 +192,7 @@ operator's browser use this same URL.
 
 | Add-on | Required when | Reason |
 |---|---|---|
+| `provisioning-base` | always | The Namespace and HelmRepository both Kustomizations need are applied there, not in either one's own inventory. |
 | `pki` | always | The factory is served over TLS, and the certificate is issued by the cluster issuer cert-manager installs. |
 | `gateway` | `gateway.enabled == true` | The route CRDs have to exist before the chart renders an Ingress, HTTPRoute, or Gateway. |
 | `identity` | always (omni) | Omni authenticates operators via SAML against Core's Keycloak realm. |

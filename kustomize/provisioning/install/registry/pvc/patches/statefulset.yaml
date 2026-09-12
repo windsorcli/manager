@@ -1,0 +1,15 @@
+# A volumeClaimTemplate, not a raw PVC, so its PVC never lands in Flux's inventory.
+- op: remove
+  path: /spec/template/spec/volumes/1
+- op: add
+  path: /spec/volumeClaimTemplates
+  value:
+    - metadata:
+        name: data
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        storageClassName: ${registry_storage_class:-single}
+        resources:
+          requests:
+            storage: ${registry_storage_size:-10Gi}

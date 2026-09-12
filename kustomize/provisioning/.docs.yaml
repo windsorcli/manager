@@ -6,9 +6,11 @@
 # Multi-facet add-on: image-factory and omni each own a separate Flux
 # Kustomization (both declared in facet addon-provisioning.yaml) but share
 # this kustomize/ directory. Every component below declares which facet it
-# belongs to.
+# belongs to. The shared Namespace and HelmRepository live in the
+# provisioning-base Kustomization.
 
 facets:
+  - shared
   - image-factory
   - omni
 
@@ -78,6 +80,10 @@ substitutions:
     description: "Identity realm Omni's SAML client registers against."
 
 components:
+  namespace:
+    facet: shared
+    enable_when: "always"
+    description: "The `provisioning` Namespace and the shared `siderolabs` HelmRepository."
   registry:
     facet: image-factory
     enable_when: "no external schematic registry is named"
@@ -85,7 +91,7 @@ components:
   registry/pvc:
     facet: image-factory
     enable_when: "`object_store.driver` is neither `hetzner` nor `aws`"
-    description: "Backs the registry with a PersistentVolumeClaim on the default storage class. Without it the registry is an emptyDir, and a restart loses every schematic id already handed out."
+    description: "Backs the registry with a volumeClaimTemplate on the default storage class, in place of its default emptyDir. Without it a restart loses every schematic id already handed out."
   registry/s3:
     facet: image-factory
     enable_when: "`object_store.driver` is `hetzner` or `aws`"
@@ -141,6 +147,9 @@ components:
     description: "A dedicated Gateway sharing the shared gateway's external IP (Cilium `lbipam.cilium.io/sharing-key`) for SideroLink WireGuard, instead of a dedicated Service."
 
 dependencies:
+  provisioning-base:
+    required_when: "always"
+    reason: "The Namespace and HelmRepository both Kustomizations need are applied there, not in either one's own inventory."
   pki:
     required_when: "always"
     reason: "The factory is served over TLS, and the certificate is issued by the cluster issuer cert-manager installs."
