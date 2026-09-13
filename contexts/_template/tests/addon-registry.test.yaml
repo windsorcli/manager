@@ -169,6 +169,50 @@ cases:
             - components:
                 - harbor/gc
 
+  # Image factory needs Harbor push credentials only when both are actually on.
+  - name: wires image factory harbor auth when both are enabled
+    values:
+      dev: true
+      platform: metal
+      network: *default-network
+      cluster: *default-cluster
+      gateway: *default-gateway
+      registry:
+        enabled: true
+        driver: harbor
+      provisioning:
+        image_factory:
+          enabled: true
+    expect:
+      flux:
+        - name: registry
+          resources:
+            - name: image-factory-auth
+              dependsOn:
+                - registry-install
+                - provisioning-base-install
+              components:
+                - harbor/image-factory
+
+  # No image factory: nothing needs the credential, so the Job stays off even
+  # though the registry driver is harbor.
+  - name: leaves image factory harbor auth out without the image factory
+    values:
+      dev: true
+      platform: metal
+      network: *default-network
+      cluster: *default-cluster
+      gateway: *default-gateway
+      registry:
+        enabled: true
+        driver: harbor
+    exclude:
+      flux:
+        - name: registry
+          resources:
+            - components:
+                - harbor/image-factory
+
   # SSO rides on identity: enabling it adds a named oidc resources variant. Harbor's own
   # install keeps its dependencies free of identity so its route comes up regardless.
   - name: wires harbor sso when identity is enabled

@@ -223,6 +223,7 @@ flux:
         - image-factory
         - "${topology == 'ha' ? 'image-factory/ha' : ''}"
         - "${(telemetry.metrics.enabled ?? false) == true ? 'image-factory/prometheus' : ''}"
+        - "${(registry_effective.driver ?? '') == 'harbor' ? 'image-factory/harbor-auth' : ''}"
       substitutions:
         external_domain: "${(dns.public_domain ?? '') == '' ? (dns.private_domain ?? dns.domain ?? '') : dns.public_domain}"
         # Explicit override wins; else derive from the domain the route publishes on.
@@ -234,8 +235,10 @@ flux:
                   : dns.public_domain)
                 + (workstation.runtime == 'docker-desktop' ? ':8443' : ''))}
         # An explicit override wins; else read the registry capability's own config.
+        # Harbor requires a project (a namespace with at least one path segment); the
+        # distribution driver has no such constraint, so only harbor gets a default here.
         factory_schematic_registry: "${provisioning.image_factory.registry.schematic.registry ?? registry_effective.hostname}"
-        factory_schematic_namespace: "${provisioning.image_factory.registry.schematic.namespace ?? 'siderolabs/image-factory'}"
+        factory_schematic_namespace: "${provisioning.image_factory.registry.schematic.namespace ?? ((registry_effective.driver ?? '') == 'harbor' ? 'image-factory' : 'siderolabs/image-factory')}"
         factory_schematic_repository: "${provisioning.image_factory.registry.schematic.repository ?? 'schematics'}"
         factory_schematic_insecure: "${(provisioning.image_factory.registry.schematic.registry ?? '') == '' ? registry_effective.insecure : (provisioning.image_factory.registry.schematic.insecure ?? false)}"
         factory_max_concurrency: "${provisioning.image_factory.max_concurrency ?? 6}"
@@ -246,6 +249,7 @@ flux:
         # (ghcr.io/siderolabs) is the upstream project's namespace, which a
         # self-hosted factory has no push credentials for.
         factory_installer_registry: "${provisioning.image_factory.registry.schematic.registry ?? registry_effective.hostname}"
+        factory_installer_namespace: "${provisioning.image_factory.registry.installer.namespace ?? ((registry_effective.driver ?? '') == 'harbor' ? 'image-factory' : '')}"
         factory_installer_repository: "${provisioning.image_factory.registry.installer.repository ?? 'installer'}"
         factory_installer_insecure: "${(provisioning.image_factory.registry.schematic.registry ?? '') == '' ? registry_effective.insecure : (provisioning.image_factory.registry.schematic.insecure ?? false)}"
       timeout: 10m

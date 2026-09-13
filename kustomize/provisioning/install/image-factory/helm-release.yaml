@@ -47,10 +47,10 @@ spec:
         installer:
           internal:
             registry: ${factory_installer_registry}
-            # Explicit empty override — the chart's own default namespace here is
+            # Empty unless overridden — the chart's own default namespace here is
             # "siderolabs", which would otherwise survive since koanf only replaces
             # keys a config file sets, not ones it omits.
-            namespace: ""
+            namespace: "${factory_installer_namespace:-}"
             repository: ${factory_installer_repository:-installer}
             insecure: ${factory_installer_insecure:-false}
       cache:

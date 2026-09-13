@@ -350,6 +350,39 @@ cases:
       flux:
         - name: registry
 
+  # registry.driver: harbor needs a project (any namespace with a path segment) and
+  # push credentials — the factory picks up both, and mounts the harbor-auth component.
+  - name: points the factory at harbor's own project and mounts its credentials
+    values:
+      id: tst1
+      dev: true
+      platform: metal
+      network: *default-network
+      cluster: *default-cluster
+      registry:
+        driver: harbor
+      provisioning:
+        image_factory:
+          enabled: true
+    expect:
+      flux:
+        - name: image-factory
+          install:
+            components:
+              - image-factory
+              - image-factory/harbor-auth
+            substitutions:
+              factory_schematic_registry: harbor.registry.svc.cluster.local
+              factory_schematic_namespace: image-factory
+              factory_schematic_insecure: "true"
+              factory_installer_namespace: image-factory
+    exclude:
+      flux:
+        - name: image-factory
+          install:
+            components:
+              - distribution
+
   # No gateway: the factory still installs, just with no external route.
   - name: installs without a route when no gateway is enabled
     values:

@@ -1,0 +1,22 @@
+# go-containerregistry (the chart's own OCI client) reads $DOCKER_CONFIG/config.json;
+# the Secret's own key is .dockerconfigjson, so the volume remaps it on the way in.
+- op: add
+  path: /spec/values/extraVolumes
+  value:
+    - name: harbor-docker-config
+      secret:
+        secretName: image-factory-harbor-pull-push
+        items:
+          - key: .dockerconfigjson
+            path: config.json
+- op: add
+  path: /spec/values/extraVolumeMounts
+  value:
+    - name: harbor-docker-config
+      mountPath: /var/run/secrets/harbor-docker-config
+      readOnly: true
+- op: add
+  path: /spec/values/env
+  value:
+    - name: DOCKER_CONFIG
+      value: /var/run/secrets/harbor-docker-config
