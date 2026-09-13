@@ -112,11 +112,8 @@ config:
 #
 flux:
 
-  # database and db-tls live under kustomize/registry/install/harbor/ -- this stays
-  # an install:-shaped Kustomization, not a resources: one, since resources: entries
-  # auto-depend on their own facet's install Kustomization, which would make this
-  # circular the moment Harbor's own install depends on it back. path: overrides
-  # the default (which would otherwise be kustomize/registry-database/install).
+  # install:, not resources: -- resources: entries auto-depend on their own
+  # facet's install, which would cycle with registry's own dependsOn below.
   - name: registry-database
     when: (registry.driver ?? 'distribution') == 'harbor'
     path: registry
@@ -139,11 +136,7 @@ flux:
   - name: registry
     dependsOn:
       - "${(registry.driver ?? 'distribution') == 'harbor' ? 'pki-install' : ''}"
-      # Harbor's own HelmRelease depends on this Kustomization, not just a component
-      # inside its own -- Flux's Helm controller fails an upgrade outright (and rolls
-      # back) if a Deployment stalls waiting on a Secret, rather than tolerating it
-      # the way a bare Kubernetes object would. database's CA has to be extracted
-      # and ready before Harbor's chart ever attempts to mount it.
+      # Flux's Helm controller rolls back if the Deployment stalls on a missing Secret.
       - "${(registry.driver ?? 'distribution') == 'harbor' ? 'registry-database-install' : ''}"
       - "${(registry.driver ?? 'distribution') == 'harbor' && gateway.enabled == true ? 'gateway-install' : ''}"
     secrets:

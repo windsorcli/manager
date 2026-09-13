@@ -36,10 +36,7 @@ spec:
         enabled: false
 
     # Dedicated CNPG Cluster (install/harbor/database/cluster.yaml), not the chart's bundled
-    # Postgres. verify-full needs CNPG's own cluster CA trusted; the chart has no
-    # database-specific CA field, only the global caBundleSecretName below, so the
-    # harbor/db-tls component copies just the CA cert out of CNPG's keypair Secret
-    # into one this chart can safely reference.
+    # Postgres. No database-specific CA field, so caBundleSecretName below carries it.
     database:
       type: external
       external:

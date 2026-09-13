@@ -1,7 +1,5 @@
-# Copies just ca.crt out of CNPG's own harbor-db-ca keypair Secret into a cert-only
-# Secret Harbor's chart can safely reference via caBundleSecretName -- that field
-# mounts the whole named Secret with no key restriction, so the keypair itself
-# never goes near Harbor's own pods.
+# Copies just ca.crt out of harbor-db-ca into a cert-only Secret; caBundleSecretName
+# mounts the whole named Secret, so the keypair itself must never be named there.
 apiVersion: batch/v1
 kind: Job
 metadata:
