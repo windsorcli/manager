@@ -64,7 +64,7 @@ cases:
                 - gateway-resources
               components:
                 - harbor/gateway
-            - name: gc
+            - name: admin-jobs
               dependsOn:
                 - registry-install
               components:
@@ -83,8 +83,9 @@ cases:
             - components:
                 - harbor/proxy-cache
 
-  # A configured proxy_cache entry adds a named resources variant that only needs
-  # Harbor's own install, not identity — unlike oidc, it has nothing to do with SSO.
+  # A configured proxy_cache entry lands in the same admin-jobs Kustomization gc
+  # already uses (identical dependsOn, gc is still on by default here) — not a
+  # separate one, and it has nothing to do with identity, unlike oidc.
   - name: adds a proxy cache project when one is configured
     values:
       dev: true
@@ -105,11 +106,12 @@ cases:
       flux:
         - name: registry
           resources:
-            - name: proxy-cache
+            - name: admin-jobs
               dependsOn:
                 - registry-install
               components:
                 - harbor/proxy-cache
+                - harbor/gc
 
   # An explicit schedule/delete_untagged override flows through the gc resources variant's
   # own substitutions.
@@ -131,7 +133,7 @@ cases:
       flux:
         - name: registry
           resources:
-            - name: gc
+            - name: admin-jobs
               components:
                 - harbor/gc
               substitutions:
@@ -626,7 +628,7 @@ cases:
               - database
               - harbor
           resources:
-            - name: gc
+            - name: admin-jobs
               components:
                 - harbor/gc
     exclude:
