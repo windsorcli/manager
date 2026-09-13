@@ -13,6 +13,9 @@ substitutions:
   harbor_registry_size:
     required_when: "`registry.driver` is `harbor`"
     description: "Size of the registry PVC when no object store backs it. Defaults to `20Gi`."
+  harbor_db_storage_size:
+    required_when: "`registry.driver` is `harbor`"
+    description: "Size of the PVC backing Harbor's dedicated CNPG database, from `registry.harbor.db_storage_size`. Defaults to `5Gi`."
   harbor_registry_bucket:
     required_when: "`harbor/s3`"
     description: "Bucket backing Harbor's registry. Built from `object_store.prefix`, the same expression the object-store Terraform module provisions."

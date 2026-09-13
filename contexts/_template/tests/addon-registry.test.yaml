@@ -51,6 +51,8 @@ cases:
             components:
               - harbor/database
               - harbor/db-tls
+            substitutions:
+              harbor_db_storage_size: 5Gi
             timeout: 40m
             interval: 5m
         - name: registry
@@ -90,6 +92,25 @@ cases:
           resources:
             - components:
                 - harbor/proxy-cache
+
+  - name: sets a custom harbor database storage size
+    values:
+      dev: true
+      platform: metal
+      network: *default-network
+      cluster: *default-cluster
+      gateway: *default-gateway
+      registry:
+        enabled: true
+        driver: harbor
+        harbor:
+          db_storage_size: 20Gi
+    expect:
+      flux:
+        - name: registry-database
+          install:
+            substitutions:
+              harbor_db_storage_size: 20Gi
 
   # A configured proxy_cache entry lands in the same admin-jobs Kustomization gc
   # already uses (identical dependsOn, gc is still on by default here) — not a

@@ -50,6 +50,7 @@ Factory's own route already sets.
 | `harbor_hostname` | `registry.driver` is `harbor` | Base hostname Harbor's UI/API advertises, from `registry.harbor.hostname` or derived as `harbor.<domain>`. Includes the docker-desktop `:8443` port suffix where the chart's own `externalURL` needs it. |
 | `harbor_storage_class` | `registry.driver` is `harbor` | Storage class for the registry PVC when no object store backs it. Defaults to `cluster.storage.class`, or `single`. |
 | `harbor_registry_size` | `registry.driver` is `harbor` | Size of the registry PVC when no object store backs it. Defaults to `20Gi`. |
+| `harbor_db_storage_size` | `registry.driver` is `harbor` | Size of the PVC backing Harbor's dedicated CNPG database, from `registry.harbor.db_storage_size`. Defaults to `5Gi`. |
 | `harbor_registry_bucket` | `harbor/s3` | Bucket backing Harbor's registry. Built from `object_store.prefix`, the same expression the object-store Terraform module provisions. |
 | `harbor_registry_region` | `harbor/s3` | Region embedded in the S3 v4 signature, from `object_store.region`. |
 | `harbor_registry_endpoint` | `harbor/s3` | S3 endpoint Harbor's registry writes to, from `object_store.endpoint`. |

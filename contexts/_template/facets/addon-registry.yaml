@@ -126,6 +126,8 @@ flux:
       components:
         - harbor/database
         - harbor/db-tls
+      substitutions:
+        harbor_db_storage_size: "${registry.harbor.db_storage_size ?? '5Gi'}"
       healthCheckExprs:
         - apiVersion: postgresql.cnpg.io/v1
           kind: Cluster

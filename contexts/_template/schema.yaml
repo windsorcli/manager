@@ -235,6 +235,10 @@ properties:
             type: string
             default: 20Gi
             description: Size of the volume backing the in-cluster registry, where no object storage exists. Holds pushed images and charts.
+          db_storage_size:
+            type: string
+            default: 5Gi
+            description: Size of the PVC backing Harbor's dedicated CloudNativePG Postgres database.
           sso:
             type: boolean
             default: true
