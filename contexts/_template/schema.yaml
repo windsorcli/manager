@@ -103,8 +103,7 @@ properties:
                     description: OCI registry the factory writes generated schematics to. It needs push access. Defaults to the registry capability; set this to point at an external registry instead.
                   namespace:
                     type: string
-                    default: siderolabs/image-factory
-                    description: Repository path prefix for schematics.
+                    description: Repository path prefix for schematics. Defaults to the registry capability's own project when unset.
                   repository:
                     type: string
                     default: schematics

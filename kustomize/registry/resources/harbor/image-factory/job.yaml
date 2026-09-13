@@ -76,11 +76,12 @@ spec:
                 sleep 5
               done
 
-              project_count=$(curl -sf --connect-timeout 5 --max-time 15 \
+              curl -sf --connect-timeout 5 --max-time 15 \
                 -u "admin:$${HARBOR_ADMIN_PASSWORD}" -G \
-                --data-urlencode "name=$${PROJECT}" "$${HARBOR}/api/v2.0/projects" \
-                | jq -r --arg n "$${PROJECT}" '[.[] | select(.name == $n)] | length')
-              if [ "$${project_count}" = "0" ]; then
+                --data-urlencode "name=$${PROJECT}" "$${HARBOR}/api/v2.0/projects" > /work/projects.json
+              project_id=$(jq -r --arg n "$${PROJECT}" '[.[] | select(.name == $n)][0].project_id // empty' /work/projects.json)
+
+              if [ -z "$${project_id}" ]; then
                 body=$(jq -n --arg name "$${PROJECT}" '{project_name: $name, metadata: {public: "false"}}')
                 http_code=$(curl -s -o /work/create-project-response -w '%{http_code}' \
                   --connect-timeout 5 --max-time 15 -u "admin:$${HARBOR_ADMIN_PASSWORD}" \
@@ -91,20 +92,27 @@ spec:
                   cat /work/create-project-response >&2
                   exit 1
                 fi
+                project_id=$(curl -sf --connect-timeout 5 --max-time 15 \
+                  -u "admin:$${HARBOR_ADMIN_PASSWORD}" -G \
+                  --data-urlencode "name=$${PROJECT}" "$${HARBOR}/api/v2.0/projects" \
+                  | jq -r --arg n "$${PROJECT}" '[.[] | select(.name == $n)][0].project_id')
                 echo "created project $${PROJECT}"
               fi
 
-              # A fresh 40-char secret every run; only ever used the once it's written below.
-              robot_secret=$(tr -dc 'A-Za-z0-9' < /dev/urandom | head -c 40)
-
-              curl -sf --connect-timeout 5 --max-time 15 -u "admin:$${HARBOR_ADMIN_PASSWORD}" \
-                "$${HARBOR}/api/v2.0/robots?page_size=100" > /work/robots.json
-              robot_id=$(jq -r --arg ns "$${PROJECT}" --arg suffix "+$${ROBOT_NAME}" \
-                '[.[] | select(.permissions[0].namespace == $ns and (.name | endswith($suffix)))][0].id // empty' \
-                /work/robots.json)
+              # An unscoped /robots only ever returns system-level robots (Harbor's own
+              # API default) -- project-level robots need this exact Level+ProjectID query.
+              curl -sf --connect-timeout 5 --max-time 15 -u "admin:$${HARBOR_ADMIN_PASSWORD}" -G \
+                --data-urlencode "q=Level=project,ProjectID=$${project_id}" \
+                --data-urlencode "page_size=100" \
+                "$${HARBOR}/api/v2.0/robots" > /work/robots.json
+              robot_id=$(jq -r --arg suffix "+$${ROBOT_NAME}" \
+                '[.[] | select(.name | endswith($suffix))][0].id // empty' /work/robots.json)
 
               if [ -n "$${robot_id}" ]; then
                 robot_name=$(jq -r --arg id "$${robot_id}" '[.[] | select((.id|tostring) == $id)][0].name' /work/robots.json)
+                # PATCH honors a client-supplied secret (unlike POST below, which doesn't).
+                robot_secret_raw=$(head -c 1024 /dev/urandom | tr -dc 'A-Za-z0-9')
+                robot_secret="$${robot_secret_raw:0:40}"
                 body=$(jq -n --arg s "$${robot_secret}" '{secret: $s}')
                 http_code=$(curl -s -o /work/refresh-response -w '%{http_code}' \
                   --connect-timeout 5 --max-time 15 -u "admin:$${HARBOR_ADMIN_PASSWORD}" \
@@ -117,10 +125,12 @@ spec:
                 fi
                 echo "refreshed robot $${robot_name}"
               else
+                # POST silently ignores any secret in the request body and always
+                # generates its own -- read the real one back from the response.
                 perm=$(jq -n --arg ns "$${PROJECT}" \
                   '[{kind: "project", namespace: $ns, access: [{resource: "repository", action: "pull"}, {resource: "repository", action: "push"}]}]')
-                body=$(jq -n --arg name "$${ROBOT_NAME}" --arg secret "$${robot_secret}" --argjson perm "$${perm}" \
-                  '{name: $name, level: "project", duration: -1, disable: false, secret: $secret, permissions: $perm}')
+                body=$(jq -n --arg name "$${ROBOT_NAME}" --argjson perm "$${perm}" \
+                  '{name: $name, level: "project", duration: -1, disable: false, permissions: $perm}')
                 http_code=$(curl -s -o /work/create-robot-response -w '%{http_code}' \
                   --connect-timeout 5 --max-time 15 -u "admin:$${HARBOR_ADMIN_PASSWORD}" \
                   -X POST -H "Content-Type: application/json" -d "$${body}" \
@@ -131,6 +141,7 @@ spec:
                   exit 1
                 fi
                 robot_name=$(jq -r '.name' /work/create-robot-response)
+                robot_secret=$(jq -r '.secret' /work/create-robot-response)
                 echo "created robot $${robot_name}"
               fi
 
