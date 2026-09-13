@@ -7,7 +7,7 @@ sources:
   - name: core
     # Digest-pinned so the CLI and Flux resolve the same content.
     # renovate: datasource=docker depName=windsorcli/core package=ghcr.io/windsorcli/core
-    url: oci://ghcr.io/windsorcli/core@sha256:ddd5178b2fc557380d8831457618fb2ca4b02085d330726f4837eddf461acaf8
+    url: oci://ghcr.io/windsorcli/core@sha256:8ebaac8e325f64bb01ee191e9426e2f6ade3026a44a17e6b0a97b2da77999773
     install: true
 terraform: []
 kustomize: []
