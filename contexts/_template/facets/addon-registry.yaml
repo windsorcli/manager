@@ -112,10 +112,28 @@ config:
 #
 flux:
 
+  # Harbor's own HelmRelease depends on this Kustomization, not just a component
+  # inside its own -- Flux's Helm controller fails an upgrade outright (and rolls
+  # back) if a Deployment stalls waiting on a Secret, rather than tolerating it the
+  # way a bare Kubernetes object would. database's CA has to be extracted and ready
+  # before Harbor's chart ever attempts to mount it, not merely applied alongside it.
+  - name: registry-database
+    when: (registry.driver ?? 'distribution') == 'harbor'
+    path: registry
+    dependsOn:
+      - database-install
+    install:
+      components:
+        - database
+        - harbor/db-tls
+      # At least the db-tls Job's own activeDeadlineSeconds (40m).
+      timeout: 40m
+      interval: 5m
+
   - name: registry
     dependsOn:
       - "${(registry.driver ?? 'distribution') == 'harbor' ? 'pki-install' : ''}"
-      - "${(registry.driver ?? 'distribution') == 'harbor' ? 'database-install' : ''}"
+      - "${(registry.driver ?? 'distribution') == 'harbor' ? 'registry-database-install' : ''}"
       - "${(registry.driver ?? 'distribution') == 'harbor' && gateway.enabled == true ? 'gateway-install' : ''}"
     secrets:
       harbor-admin-password:
@@ -136,7 +154,6 @@ flux:
           secret_key: ${hetzner.object_storage.secret_key ?? env("HETZNER_S3_SECRET_KEY") ?? ''}
     install:
       components:
-        - "${(registry.driver ?? 'distribution') == 'harbor' ? 'database' : ''}"
         - "${(registry.driver ?? 'distribution') == 'harbor' ? 'harbor' : ''}"
         - "${(registry.driver ?? 'distribution') == 'harbor' && (object_store.driver == 'hetzner' || object_store.driver == 'aws') ? 'harbor/s3' : ''}"
         - "${(registry.driver ?? 'distribution') == 'harbor' && (telemetry.metrics.enabled ?? false) == true ? 'harbor/prometheus' : ''}"

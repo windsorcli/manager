@@ -44,14 +44,22 @@ cases:
         driver: harbor
     expect:
       flux:
-        - name: registry
+        - name: registry-database
           dependsOn:
-            - pki-install
             - database-install
-            - gateway-install
           install:
             components:
               - database
+              - harbor/db-tls
+            timeout: 40m
+            interval: 5m
+        - name: registry
+          dependsOn:
+            - pki-install
+            - registry-database-install
+            - gateway-install
+          install:
+            components:
               - harbor
             substitutions:
               harbor_hostname: harbor.test
@@ -160,7 +168,6 @@ cases:
         - name: registry
           install:
             components:
-              - database
               - harbor
     exclude:
       flux:
@@ -232,11 +239,10 @@ cases:
         - name: registry
           dependsOn:
             - pki-install
-            - database-install
+            - registry-database-install
             - gateway-install
           install:
             components:
-              - database
               - harbor
           resources:
             - components:
@@ -301,7 +307,6 @@ cases:
         - name: registry
           install:
             components:
-              - database
               - harbor
           resources:
             - components:
@@ -338,7 +343,6 @@ cases:
         - name: registry
           install:
             components:
-              - database
               - harbor
           resources:
             - components:
@@ -384,6 +388,7 @@ cases:
           install:
             components:
               - database
+              - harbor/db-tls
               - harbor
           resources:
             - components:
@@ -449,7 +454,6 @@ cases:
         - name: registry
           install:
             components:
-              - database
               - harbor
 
   # Explicit hostname override flows through the install-tier substitution.
@@ -506,7 +510,6 @@ cases:
         - name: registry
           install:
             components:
-              - database
               - harbor
               - harbor/s3
             substitutions:
@@ -562,7 +565,6 @@ cases:
         - name: registry
           install:
             components:
-              - database
               - harbor
               - harbor/s3
             substitutions:
@@ -622,10 +624,9 @@ cases:
         - name: registry
           dependsOn:
             - pki-install
-            - database-install
+            - registry-database-install
           install:
             components:
-              - database
               - harbor
           resources:
             - name: admin-jobs
@@ -659,7 +660,6 @@ cases:
         - name: registry
           install:
             components:
-              - database
               - harbor
               - harbor/prometheus
         - name: manager-observability
@@ -689,7 +689,6 @@ cases:
         - name: registry
           install:
             components:
-              - database
               - harbor
     exclude:
       flux:
