@@ -84,6 +84,9 @@ components:
   harbor/gc:
     enable_when: "`registry.driver` is `harbor` and `registry.harbor.gc.enabled` is not explicitly false (default on)"
     description: "Admin-API Job that sets Harbor's own GC schedule via its admin API. Harbor's jobservice runs GC on that schedule afterward; the Job only sets the schedule once. A named `gc` resources variant of the `registry` flux system, depending only on Harbor's own install."
+  harbor/image-factory:
+    enable_when: "`registry.driver` is `harbor` and `provisioning.image_factory.enabled == true`"
+    description: "Admin-API Job that creates an `image-factory` Harbor project and a scoped push/pull robot account, then writes a dockerconfigjson Secret in `provisioning` for the factory's own pod to mount. Needs RBAC to write that Secret cross-namespace — the only admin-API Job here that talks to the Kubernetes API, not just Harbor's."
   distribution:
     enable_when: "`registry.driver` is `distribution` (the default)"
     description: "Bare, anonymous `distribution/distribution` StatefulSet + Service in `registry`. No auth, no scanning, no UI — a `NetworkPolicy` restricts ingress to image-factory's own pods, in their own namespace. The cheap default for a single internal consumer."
