@@ -1,0 +1,15 @@
+# In provisioning, not registry -- that's where image-factory's own pod reads the
+# Secret this Job writes. create can't be scoped by resourceNames; the rest can.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: harbor-image-factory-auth
+  namespace: provisioning
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["create"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames: ["image-factory-harbor-pull-push"]
+    verbs: ["get", "update", "patch"]

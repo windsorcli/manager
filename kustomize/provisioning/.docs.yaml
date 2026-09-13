@@ -36,6 +36,9 @@ substitutions:
   factory_min_talos_version:
     required_when: "optional"
     description: "Oldest Talos release assets are generated for. Defaults to `1.2.0`."
+  factory_installer_namespace:
+    required_when: "optional"
+    description: "Repository path prefix for installer images. Empty for the distribution driver; `image-factory` for harbor."
   omni_account_id:
     required_when: "always"
     description: "UUID for `config.account.id`, from `provisioning.omni.account_id` or the `omni-account` Terraform module's state."
@@ -82,6 +85,10 @@ components:
     facet: image-factory
     enable_when: "gateway is enabled"
     description: "HTTPRoute on Core's canonical `external` Gateway, attached to both the web-http and web-https listeners. One route serves both gateway drivers, since envoy and cilium each implement Gateway API. Lives in the resources tier and depends on `gateway-resources`."
+  image-factory/harbor-auth:
+    facet: image-factory
+    enable_when: "the registry capability's driver is harbor"
+    description: "Mounts the dockerconfigjson Secret `harbor/image-factory` writes (kustomize/registry/) and points `DOCKER_CONFIG` at it, so the chart's own OCI client authenticates its pushes."
 
   omni:
     facet: omni

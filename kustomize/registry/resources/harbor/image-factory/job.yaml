@@ -1,0 +1,156 @@
+# Creates a Harbor project and a scoped push/pull robot account for image factory,
+# then writes the credential as a dockerconfigjson Secret in provisioning -- where
+# image factory's own pod reads it. Creates what's missing; a lost secret is
+# recovered by refreshing the existing robot's, not by recreating it.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: harbor-image-factory-auth
+  namespace: registry
+  annotations:
+    kustomize.toolkit.fluxcd.io/force: enabled
+spec:
+  backoffLimit: 20
+  ttlSecondsAfterFinished: 86400
+  activeDeadlineSeconds: 2400
+  template:
+    spec:
+      serviceAccountName: harbor-image-factory-auth
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      volumes:
+        - name: work
+          emptyDir:
+            medium: Memory
+            sizeLimit: 1Mi
+      containers:
+        - name: configure-image-factory-auth
+          # renovate: datasource=docker depName=kubectl package=alpine/k8s
+          image: alpine/k8s:1.37.0@sha256:b421c2e9419edb98db39b6ab641669f4db7bb2acf354f22450c6b7e7176d1ff4
+          volumeMounts:
+            - name: work
+              mountPath: /work
+          env:
+            - name: HOME
+              value: /work
+            - name: TMPDIR
+              value: /work
+            - name: HARBOR_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: harbor-admin-password
+                  key: HARBOR_ADMIN_PASSWORD
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -euo pipefail
+              umask 077
+              HARBOR="http://harbor.registry.svc.cluster.local"
+              PROJECT="image-factory"
+              ROBOT_NAME="pusher"
+              SECRET_NAME="image-factory-harbor-pull-push"
+              SECRET_NAMESPACE="provisioning"
+
+              if kubectl get secret "$${SECRET_NAME}" -n "$${SECRET_NAMESPACE}" >/dev/null 2>&1; then
+                echo "credentials already configured"
+                exit 0
+              fi
+
+              i=0
+              while :; do
+                if curl -sf --connect-timeout 5 --max-time 15 \
+                  -u "admin:$${HARBOR_ADMIN_PASSWORD}" \
+                  "$${HARBOR}/api/v2.0/systeminfo" >/dev/null 2>&1; then
+                  break
+                fi
+                i=$$((i + 1))
+                if [ "$${i}" -ge 120 ]; then
+                  echo "timed out waiting for the harbor api" >&2
+                  exit 1
+                fi
+                sleep 5
+              done
+
+              project_count=$(curl -sf --connect-timeout 5 --max-time 15 \
+                -u "admin:$${HARBOR_ADMIN_PASSWORD}" -G \
+                --data-urlencode "name=$${PROJECT}" "$${HARBOR}/api/v2.0/projects" \
+                | jq -r --arg n "$${PROJECT}" '[.[] | select(.name == $n)] | length')
+              if [ "$${project_count}" = "0" ]; then
+                body=$(jq -n --arg name "$${PROJECT}" '{project_name: $name, metadata: {public: "false"}}')
+                http_code=$(curl -s -o /work/create-project-response -w '%{http_code}' \
+                  --connect-timeout 5 --max-time 15 -u "admin:$${HARBOR_ADMIN_PASSWORD}" \
+                  -X POST -H "Content-Type: application/json" -d "$${body}" \
+                  "$${HARBOR}/api/v2.0/projects")
+                if [ "$${http_code}" -lt 200 ] || [ "$${http_code}" -ge 300 ]; then
+                  echo "failed to create project $${PROJECT} (HTTP $${http_code}):" >&2
+                  cat /work/create-project-response >&2
+                  exit 1
+                fi
+                echo "created project $${PROJECT}"
+              fi
+
+              # A fresh 40-char secret every run; only ever used the once it's written below.
+              robot_secret=$(tr -dc 'A-Za-z0-9' < /dev/urandom | head -c 40)
+
+              curl -sf --connect-timeout 5 --max-time 15 -u "admin:$${HARBOR_ADMIN_PASSWORD}" \
+                "$${HARBOR}/api/v2.0/robots?page_size=100" > /work/robots.json
+              robot_id=$(jq -r --arg ns "$${PROJECT}" --arg suffix "+$${ROBOT_NAME}" \
+                '[.[] | select(.permissions[0].namespace == $ns and (.name | endswith($suffix)))][0].id // empty' \
+                /work/robots.json)
+
+              if [ -n "$${robot_id}" ]; then
+                robot_name=$(jq -r --arg id "$${robot_id}" '[.[] | select((.id|tostring) == $id)][0].name' /work/robots.json)
+                body=$(jq -n --arg s "$${robot_secret}" '{secret: $s}')
+                http_code=$(curl -s -o /work/refresh-response -w '%{http_code}' \
+                  --connect-timeout 5 --max-time 15 -u "admin:$${HARBOR_ADMIN_PASSWORD}" \
+                  -X PATCH -H "Content-Type: application/json" -d "$${body}" \
+                  "$${HARBOR}/api/v2.0/robots/$${robot_id}")
+                if [ "$${http_code}" -lt 200 ] || [ "$${http_code}" -ge 300 ]; then
+                  echo "failed to refresh robot $${robot_name} (HTTP $${http_code}):" >&2
+                  cat /work/refresh-response >&2
+                  exit 1
+                fi
+                echo "refreshed robot $${robot_name}"
+              else
+                perm=$(jq -n --arg ns "$${PROJECT}" \
+                  '[{kind: "project", namespace: $ns, access: [{resource: "repository", action: "pull"}, {resource: "repository", action: "push"}]}]')
+                body=$(jq -n --arg name "$${ROBOT_NAME}" --arg secret "$${robot_secret}" --argjson perm "$${perm}" \
+                  '{name: $name, level: "project", duration: -1, disable: false, secret: $secret, permissions: $perm}')
+                http_code=$(curl -s -o /work/create-robot-response -w '%{http_code}' \
+                  --connect-timeout 5 --max-time 15 -u "admin:$${HARBOR_ADMIN_PASSWORD}" \
+                  -X POST -H "Content-Type: application/json" -d "$${body}" \
+                  "$${HARBOR}/api/v2.0/robots")
+                if [ "$${http_code}" -lt 200 ] || [ "$${http_code}" -ge 300 ]; then
+                  echo "failed to create robot $${ROBOT_NAME} (HTTP $${http_code}):" >&2
+                  cat /work/create-robot-response >&2
+                  exit 1
+                fi
+                robot_name=$(jq -r '.name' /work/create-robot-response)
+                echo "created robot $${robot_name}"
+              fi
+
+              kubectl create secret docker-registry "$${SECRET_NAME}" \
+                --docker-server="harbor.registry.svc.cluster.local" \
+                --docker-username="$${robot_name}" \
+                --docker-password="$${robot_secret}" \
+                -n "$${SECRET_NAMESPACE}" --dry-run=client -o yaml | kubectl apply -f -
+              echo "wrote $${SECRET_NAME} in $${SECRET_NAMESPACE}"
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 64Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+            seccompProfile:
+              type: RuntimeDefault

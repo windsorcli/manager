@@ -117,6 +117,9 @@ properties:
               installer:
                 type: object
                 properties:
+                  namespace:
+                    type: string
+                    description: Repository path prefix for installer images. Defaults to the registry capability's own project when unset.
                   repository:
                     type: string
                     default: installer

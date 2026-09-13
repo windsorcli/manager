@@ -227,6 +227,19 @@ flux:
         timeout: 40m
         interval: 5m
 
+      # Gives image factory push credentials for Harbor. provisioning-base-install
+      # so the provisioning namespace this Job's RoleBinding targets already exists.
+      - name: image-factory-auth
+        when: (registry.driver ?? 'distribution') == 'harbor' && provisioning.image_factory.enabled == true
+        dependsOn:
+          - registry-install
+          - provisioning-base-install
+        components:
+          - harbor/image-factory
+        # At least the Job's own activeDeadlineSeconds (40m).
+        timeout: 40m
+        interval: 5m
+
   # Both contribute into config-observability.yaml's manager-observability
   # Kustomization rather than owning their own — see that facet's comment for why
   # (name collision risk with Core's own observability/telemetry).
