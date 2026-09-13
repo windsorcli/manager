@@ -122,6 +122,7 @@ flux:
     install:
       components:
         - harbor/database
+        - "${topology == 'ha' ? 'harbor/database/ha' : ''}"
         - harbor/db-tls
       substitutions:
         harbor_db_storage_size: "${registry.harbor.db_storage_size ?? '5Gi'}"

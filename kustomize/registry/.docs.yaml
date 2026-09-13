@@ -69,6 +69,9 @@ components:
   harbor/database:
     enable_when: "`registry.driver` is `harbor` (default `distribution`)"
     description: "Dedicated CloudNativePG `Cluster` (`harbor-db`) — Harbor's Postgres, not the chart's bundled one."
+  harbor/database/ha:
+    enable_when: "`registry.driver` is `harbor` and `topology: ha`"
+    description: "Scales the CloudNativePG `Cluster` to 3 instances with required pod anti-affinity, so each Postgres instance lands on a distinct node."
   harbor/db-tls:
     enable_when: "`registry.driver` is `harbor` (default `distribution`)"
     description: "Copies `ca.crt` out of CNPG's `harbor-db-ca` keypair Secret into a cert-only `harbor-db-ca-cert` Secret, so Harbor's `caBundleSecretName` (which mounts the whole named Secret with no key restriction) never gets the private key too. Backs `sslmode: verify-full` on Harbor's database connection."

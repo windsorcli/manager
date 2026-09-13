@@ -112,6 +112,26 @@ cases:
             substitutions:
               harbor_db_storage_size: 20Gi
 
+  - name: scales the harbor database under ha topology
+    values:
+      dev: true
+      platform: metal
+      topology: ha
+      network: *default-network
+      cluster: *default-cluster
+      gateway: *default-gateway
+      registry:
+        enabled: true
+        driver: harbor
+    expect:
+      flux:
+        - name: registry-database
+          install:
+            components:
+              - harbor/database
+              - harbor/database/ha
+              - harbor/db-tls
+
   # A configured proxy_cache entry lands in the same admin-jobs Kustomization gc
   # already uses (identical dependsOn, gc is still on by default here) — not a
   # separate one, and it has nothing to do with identity, unlike oidc.

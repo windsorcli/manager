@@ -7,6 +7,7 @@ metadata:
   name: harbor-db
   namespace: registry
 spec:
+  # Single instance by default; the ha/ overlay scales this under topology: ha.
   instances: 1
   storage:
     size: ${harbor_db_storage_size:-5Gi}

@@ -73,6 +73,7 @@ Factory's own route already sets.
 | Component | Enable when | Effect |
 |---|---|---|
 | `harbor/database` | `registry.driver` is `harbor` (default `distribution`) | Dedicated CloudNativePG `Cluster` (`harbor-db`) — Harbor's Postgres, not the chart's bundled one. |
+| `harbor/database/ha` | `registry.driver` is `harbor` and `topology: ha` | Scales the CloudNativePG `Cluster` to 3 instances with required pod anti-affinity, so each Postgres instance lands on a distinct node. |
 | `harbor/db-tls` | `registry.driver` is `harbor` (default `distribution`) | Copies `ca.crt` out of CNPG's `harbor-db-ca` keypair Secret into a cert-only `harbor-db-ca-cert` Secret, so Harbor's `caBundleSecretName` (which mounts the whole named Secret with no key restriction) never gets the private key too. Backs `sslmode: verify-full` on Harbor's database connection. |
 | `harbor` | `registry.driver` is `harbor` (default `distribution`) | Helm release of the official `goharbor/harbor-helm` chart in `harbor`. Local admin auth. |
 | `harbor/s3` | `registry.driver` is `harbor` and `object_store.driver` is `hetzner` or `aws` | Backs Harbor with a bucket from the platform's object store instead of a PVC. Own bucket, own destroy policy — not shared with the distribution driver's. |
