@@ -181,6 +181,9 @@ cases:
         - name: manager-observability
 
   # In-cluster registry with nothing to back it: a PVC on the default storage class.
+  # image-factory turns registry on itself (no explicit registry: needed) and reads
+  # registry_effective — addon-registry.yaml's own computed config — for its own
+  # schematic/cache/installer hostname.
   - name: backs the in-cluster registry with a pvc when no object store resolves
     values:
       id: tst1
@@ -192,15 +195,28 @@ cases:
           enabled: true
     expect:
       flux:
+        - name: registry
+          install:
+            components:
+              - distribution
+              - distribution/pvc
+            substitutions:
+              registry_endpoint: ""
+              registry_replicas: "1"
         - name: image-factory
           install:
             components:
               - image-factory
-              - registry
-              - registry/pvc
             substitutions:
-              registry_endpoint: ""
-              registry_replicas: "1"
+              factory_schematic_registry: distribution.registry.svc.cluster.local:5000
+              factory_schematic_insecure: "true"
+    exclude:
+      flux:
+        - name: registry
+          install:
+            components:
+              - database
+              - harbor
 
   # Core's minio operator creates no Tenant and the schema carries no keys for one, so the
   # registry stays on a PVC rather than pointing at a bucket it cannot authenticate to.
@@ -219,21 +235,21 @@ cases:
           enabled: true
     expect:
       flux:
-        - name: image-factory
+        - name: registry
           install:
             components:
-              - image-factory
-              - registry
-              - registry/pvc
+              - distribution
+              - distribution/pvc
             substitutions:
-              # Resolved, but unread: registry/s3 is the only component that consumes it,
-              # and the pvc branch is what a minio driver selects.
+              # Resolved, but unread: distribution/s3 is the only component that
+              # consumes it, and the pvc branch is what a minio driver selects.
               registry_endpoint: https://minio.system-object-store.svc:9000
               registry_replicas: "1"
 
   # A platform with its own object storage needs no addon to reach s3, and the bucket
-  # name has to match the one config-object-store provisions. The env credential fallback
-  # is what lets this resolve at all — see config-object-store's own hetzner case.
+  # name has to match the one addon-registry.yaml's own terraform block provisions. The
+  # env credential fallback is what lets this resolve at all — see config-object-store's
+  # own hetzner case.
   - name: derives the bucket, region, and endpoint from the platform on hetzner
     env:
       HETZNER_S3_ACCESS_KEY: test-access
@@ -252,14 +268,13 @@ cases:
           enabled: true
     expect:
       flux:
-        - name: image-factory
+        - name: registry
           install:
             components:
-              - image-factory
-              - registry
-              - registry/s3
+              - distribution
+              - distribution/s3
             substitutions:
-              registry_bucket: windsor-tst1-image-factory
+              registry_bucket: windsor-tst1-registry
               registry_region: fsn1
               registry_endpoint: https://fsn1.your-objectstorage.com
 
@@ -278,20 +293,19 @@ cases:
           enabled: true
     expect:
       terraform:
-        - name: image-factory-object-store
+        - name: registry-distribution-object-store
           path: object-store/aws
           inputs:
             buckets:
-              - windsor-tst1-image-factory
+              - windsor-tst1-registry
       flux:
-        - name: image-factory
+        - name: registry
           install:
             components:
-              - image-factory
-              - registry
-              - registry/s3
+              - distribution
+              - distribution/s3
             substitutions:
-              registry_bucket: windsor-tst1-image-factory
+              registry_bucket: windsor-tst1-registry
               registry_region: us-west-2
               registry_endpoint: https://s3.us-west-2.amazonaws.com
 
@@ -310,10 +324,31 @@ cases:
           enabled: true
     expect:
       flux:
-        - name: image-factory
+        - name: registry
           install:
             substitutions:
               registry_replicas: "2"
+
+  # An external registry (provisioning.image_factory.registry.schematic.registry set)
+  # bypasses the registry capability entirely — nothing here should stand one up.
+  - name: does not turn the registry capability on when an external registry is named
+    values:
+      id: tst1
+      platform: metal
+      network: *default-network
+      cluster: *default-cluster
+      provisioning:
+        image_factory: *default-factory
+    expect:
+      flux:
+        - name: image-factory
+          install:
+            substitutions:
+              factory_schematic_registry: registry.example.com
+              factory_schematic_insecure: "false"
+    exclude:
+      flux:
+        - name: registry
 
   # No gateway: the factory still installs, just with no external route.
   - name: installs without a route when no gateway is enabled

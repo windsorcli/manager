@@ -2,30 +2,28 @@ kind: Facet
 apiVersion: blueprints.windsorcli.dev/v1alpha1
 metadata:
   name: registry
-  description: Fleet container registry (Harbor)
+  description: Fleet container registry (harbor or a bare distribution store)
 
-# registry.driver is capability-plus-driver, the same shape identity.driver and
-# database.postgres.driver use — one driver (harbor) today, room for another without a
-# breaking schema change.
-when: registry.enabled == true && (registry.driver ?? 'harbor') == 'harbor'
+# registry.driver: distribution (cheap, anonymous, the default) or harbor (opt-in,
+# full-featured).
+when: registry.enabled == true
 
 requires:
-  - when: dev != true
+  - when: (registry.driver ?? 'distribution') == 'harbor' && dev != true
     paths:
       - registry.harbor.admin_password
     message: Harbor requires a local admin password outside dev mode. Set registry.harbor.admin_password via a secret() reference.
 
 # =============================================================================
-# Terraform — object-store bucket
+# Terraform — object-store buckets
 # =============================================================================
-# A separate stack from image-factory's own object-store invocation, same module,
-# different bucket and destroy policy. force_destroy stays off (the module's default is
-# on): Harbor holds images an operator or CI pipeline pushed, not a cache regenerated on a miss.
+# Harbor's bucket disables force_destroy: it holds pushed images, not a cache.
+# distribution's bucket keeps the module's own default (force_destroy on): rebuildable.
 terraform:
 
   - name: harbor-object-store
     path: object-store/hetzner
-    when: object_store.driver == 'hetzner'
+    when: (registry.driver ?? 'distribution') == 'harbor' && object_store.driver == 'hetzner'
     inputs:
       access_key: ${hetzner.object_storage.access_key ?? env("HETZNER_S3_ACCESS_KEY")}
       secret_key: ${hetzner.object_storage.secret_key ?? env("HETZNER_S3_SECRET_KEY")}
@@ -36,12 +34,30 @@ terraform:
 
   - name: harbor-object-store
     path: object-store/aws
-    when: object_store.driver == 'aws'
+    when: (registry.driver ?? 'distribution') == 'harbor' && object_store.driver == 'aws'
     inputs:
       region: ${aws.region}
       force_destroy: false
       buckets:
         - "${object_store.prefix}-harbor"
+
+  - name: registry-distribution-object-store
+    path: object-store/hetzner
+    when: (registry.driver ?? 'distribution') == 'distribution' && object_store.driver == 'hetzner'
+    inputs:
+      access_key: ${hetzner.object_storage.access_key ?? env("HETZNER_S3_ACCESS_KEY")}
+      secret_key: ${hetzner.object_storage.secret_key ?? env("HETZNER_S3_SECRET_KEY")}
+      location: "${hetzner.object_storage.location ?? 'fsn1'}"
+      buckets:
+        - "${object_store.prefix}-registry"
+
+  - name: registry-distribution-object-store
+    path: object-store/aws
+    when: (registry.driver ?? 'distribution') == 'distribution' && object_store.driver == 'aws'
+    inputs:
+      region: ${aws.region}
+      buckets:
+        - "${object_store.prefix}-registry"
 
 config:
   # The CloudNativePG operator (Core's database facet) is install-only — it manages
@@ -52,12 +68,24 @@ config:
   # entry gates on database.postgres.driver == 'cloudnativepg' with no ?? fallback of
   # its own — the same pattern addon-identity.yaml uses for this exact dependency.
   - name: database
+    when: (registry.driver ?? 'distribution') == 'harbor'
     value:
       postgres:
         enabled: true
         driver: "${database.postgres.driver ?? 'cloudnativepg'}"
 
+  # Read by any facet that wants a registry without caring which driver backs it.
+  - name: registry_effective
+    value:
+      driver: "${registry.driver ?? 'distribution'}"
+      hostname: >-
+        ${(registry.driver ?? 'distribution') == 'harbor'
+          ? 'harbor.registry.svc.cluster.local'
+          : 'distribution.registry.svc.cluster.local:5000'}
+      insecure: true
+
   - name: harbor_effective
+    when: (registry.driver ?? 'distribution') == 'harbor'
     value:
       hostname: >-
         ${registry.harbor.hostname
@@ -76,25 +104,23 @@ config:
       gc: ${(registry.harbor.gc.enabled ?? true) != false}
 
 # =============================================================================
-# Flux system — Harbor
+# Flux system — the registry (harbor or distribution, whichever driver is active)
 # =============================================================================
-# pki-install issues the TLS certificate the gateway serves harbor.<domain> under;
-# gateway-install supplies the route CRDs; database-install is the CNPG operator this
-# facet's own harbor-db Cluster (install/database) depends on existing first. Named
-# "registry" (not "harbor") to match its kustomize path implicitly — same relationship
-# Core's own "identity" flux system has to the keycloak-specific pieces inside it.
+# pki-install/database-install apply to harbor only, conditional like gateway-install.
+# Named "registry" to match its kustomize path — same relationship Core's own
+# "identity" flux system has to the keycloak-specific pieces inside it.
 #
 flux:
 
   - name: registry
     dependsOn:
-      - pki-install
-      - database-install
-      - "${gateway.enabled == true ? 'gateway-install' : ''}"
+      - "${(registry.driver ?? 'distribution') == 'harbor' ? 'pki-install' : ''}"
+      - "${(registry.driver ?? 'distribution') == 'harbor' ? 'database-install' : ''}"
+      - "${(registry.driver ?? 'distribution') == 'harbor' && gateway.enabled == true ? 'gateway-install' : ''}"
     secrets:
       harbor-admin-password:
         data:
-          HARBOR_ADMIN_PASSWORD: ${harbor_effective.admin_password}
+          HARBOR_ADMIN_PASSWORD: ${harbor_effective.admin_password ?? ''}
       harbor-registry-s3:
         data:
           REGISTRY_STORAGE_S3_ACCESSKEY: ${hetzner.object_storage.access_key ?? env("HETZNER_S3_ACCESS_KEY") ?? ''}
@@ -103,16 +129,32 @@ flux:
       harbor-proxy-cache-config:
         data:
           proxy-cache.yaml: ${yamlString(registry.harbor.proxy_cache ?? [])}
+      # Used only by distribution/s3; harmless to materialize otherwise.
+      registry-s3:
+        data:
+          access_key: ${hetzner.object_storage.access_key ?? env("HETZNER_S3_ACCESS_KEY") ?? ''}
+          secret_key: ${hetzner.object_storage.secret_key ?? env("HETZNER_S3_SECRET_KEY") ?? ''}
     install:
       components:
-        - database
-        - harbor
-        - "${object_store.driver == 'hetzner' || object_store.driver == 'aws' ? 'harbor/s3' : ''}"
-        - "${(telemetry.metrics.enabled ?? false) == true ? 'harbor/prometheus' : ''}"
+        - "${(registry.driver ?? 'distribution') == 'harbor' ? 'database' : ''}"
+        - "${(registry.driver ?? 'distribution') == 'harbor' ? 'harbor' : ''}"
+        - "${(registry.driver ?? 'distribution') == 'harbor' && (object_store.driver == 'hetzner' || object_store.driver == 'aws') ? 'harbor/s3' : ''}"
+        - "${(registry.driver ?? 'distribution') == 'harbor' && (telemetry.metrics.enabled ?? false) == true ? 'harbor/prometheus' : ''}"
+        - "${(registry.driver ?? 'distribution') == 'distribution' ? 'distribution' : ''}"
+        - "${(registry.driver ?? 'distribution') == 'distribution' && (object_store.driver == 'hetzner' || object_store.driver == 'aws') ? 'distribution/s3' : ''}"
+        - "${(registry.driver ?? 'distribution') == 'distribution' && object_store.driver != 'hetzner' && object_store.driver != 'aws' ? 'distribution/pvc' : ''}"
       substitutions:
         harbor_hostname: "${harbor_effective.hostname}${workstation.runtime == 'docker-desktop' ? ':8443' : ''}"
         harbor_storage_class: "${cluster.storage.class ?? 'single'}"
         harbor_registry_size: "${registry.harbor.registry_size ?? '20Gi'}"
+        # Used only by the distribution driver's own install/pvc/s3 components.
+        registry_storage_class: "${cluster.storage.class ?? 'single'}"
+        registry_storage_size: "${registry.distribution.storage_size ?? '10Gi'}"
+        registry_replicas: "${topology == 'ha' && (object_store.driver == 'hetzner' || object_store.driver == 'aws') ? 2 : 1}"
+        # Matches the bucket name the terraform block above provisions.
+        registry_bucket: "${object_store.prefix}-registry"
+        registry_region: "${object_store.region ?? ''}"
+        registry_endpoint: "${object_store.endpoint ?? ''}"
         # Same expression the terraform block above hands the bucket module, so the
         # registry and the bucket that gets provisioned cannot drift apart.
         harbor_registry_bucket: "${object_store.prefix}-harbor"
@@ -124,8 +166,9 @@ flux:
       # No hard requires: on gateway.enabled — Harbor's install doesn't need one (the
       # chart's own expose.type stays clusterIP either way), the same posture
       # addon-observability.yaml uses for Grafana. Without a gateway, reach Harbor by
-      # port-forwarding the harbor Service in the registry namespace.
-      - when: gateway.enabled == true
+      # port-forwarding the harbor Service in the registry namespace. distribution
+      # never gets a route — it has no UI/API worth exposing.
+      - when: (registry.driver ?? 'distribution') == 'harbor' && gateway.enabled == true
         dependsOn:
           - gateway-resources
         components:
@@ -140,7 +183,7 @@ flux:
       # install or gateway route — the same shape addon-identity.yaml uses to
       # sequence its database resources variant ahead of the Keycloak CR.
       - name: oidc
-        when: harbor_effective.sso == true
+        when: (registry.driver ?? 'distribution') == 'harbor' && harbor_effective.sso == true
         dependsOn:
           - registry-install
           - identity-resources
@@ -161,7 +204,7 @@ flux:
       # Proxy-cache projects. A resources variant, not an install component, for the
       # same reason oidc is: it needs Harbor's own API up, not just the chart applied.
       - name: proxy-cache
-        when: len(registry.harbor.proxy_cache ?? []) > 0
+        when: (registry.driver ?? 'distribution') == 'harbor' && len(registry.harbor.proxy_cache ?? []) > 0
         dependsOn:
           - registry-install
         components:
@@ -172,7 +215,7 @@ flux:
 
       # Sets Harbor's own GC schedule once; Harbor's jobservice runs it from then on.
       - name: gc
-        when: harbor_effective.gc == true
+        when: (registry.driver ?? 'distribution') == 'harbor' && harbor_effective.gc == true
         dependsOn:
           - registry-install
         components:
@@ -188,7 +231,7 @@ flux:
   # Kustomization rather than owning their own — see that facet's comment for why
   # (name collision risk with Core's own observability/telemetry).
   - name: manager-observability
-    when: registry.enabled == true && (telemetry.metrics.enabled ?? false) == true
+    when: (registry.driver ?? 'distribution') == 'harbor' && (telemetry.metrics.enabled ?? false) == true
     resources:
       - components:
           - prometheus/alerts/harbor
@@ -204,7 +247,7 @@ flux:
   # telemetry.metrics.enabled == true, so this stays off if an operator disables
   # metrics while keeping logs on — both default on, so this rarely bites.
   - name: manager-observability
-    when: registry.enabled == true && (telemetry.logs.enabled ?? true) == true && (telemetry.logs.driver ?? 'fluentd') == 'fluentd'
+    when: (registry.driver ?? 'distribution') == 'harbor' && (telemetry.logs.enabled ?? true) == true && (telemetry.logs.driver ?? 'fluentd') == 'fluentd'
     resources:
       - components:
           - harbor/log-filter

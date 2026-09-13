@@ -159,7 +159,7 @@ jobs:
           # harbor_effective.sso) — without it, this track never proves Harbor's SSO
           # wiring actually works, only that Harbor itself installs.
           - name: registry
-            sets: --set registry.enabled=true --set identity.enabled=true --set telemetry.metrics.enabled=true
+            sets: --set registry.enabled=true --set registry.driver=harbor --set identity.enabled=true --set telemetry.metrics.enabled=true
             up_timeout: 40
             job_timeout: 55
     steps:

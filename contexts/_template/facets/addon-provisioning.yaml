@@ -32,13 +32,12 @@ requires:
     message: Omni requires at least one bootstrap admin email in config.auth.initialUsers before it will start. Set provisioning.omni.initial_admins to a list of operator emails — real access should route through Keycloak SAML group membership once it's set up.
 
 # =============================================================================
-# Terraform — cache signing key (image factory), account ID (omni), object-store
-# buckets (image factory's registry and omni's backup destination, on hetzner/aws)
+# Terraform — cache signing key (image factory), account ID (omni), omni's backup
+# bucket. The registry's own bucket lives in addon-registry.yaml now.
 # =============================================================================
-# The signing key and account ID are generated once and held in state, applied only
-# when the operator supplies no value of their own. Bucket provisioning only runs
-# where the platform's own object storage backs the registry. provisioning/omni also
-# holds Omni's etcd backup S3 config, commented out for now — see that module's README.
+# Generated once and held in state; applied only when the operator supplies no
+# value of their own. provisioning/omni also holds Omni's etcd backup S3 config,
+# commented out for now — see that module's README.
 terraform:
 
   - name: image-factory-signing-key
@@ -48,27 +47,6 @@ terraform:
   - name: omni-account
     path: provisioning/omni
     when: (provisioning.enabled == true || provisioning.omni.enabled == true) && identity.enabled != false && (provisioning.omni.account_id ?? '') == ''
-
-  - name: image-factory-object-store
-    path: object-store/hetzner
-    when: object_store.driver == 'hetzner' && provisioning.image_factory.enabled == true
-    inputs:
-      access_key: ${hetzner.object_storage.access_key ?? env("HETZNER_S3_ACCESS_KEY")}
-      secret_key: ${hetzner.object_storage.secret_key ?? env("HETZNER_S3_SECRET_KEY")}
-      location: "${hetzner.object_storage.location ?? 'fsn1'}"
-      # Rebuildable cache — force_destroy stays on. Harbor's own bucket
-      # (addon-registry.yaml) is a separate stack invocation with its own setting,
-      # not shared with this one.
-      buckets:
-        - "${object_store.prefix}-image-factory"
-
-  - name: image-factory-object-store
-    path: object-store/aws
-    when: object_store.driver == 'aws' && provisioning.image_factory.enabled == true
-    inputs:
-      region: ${aws.region}
-      buckets:
-        - "${object_store.prefix}-image-factory"
 
   - name: omni-backup-object-store
     path: object-store/hetzner
@@ -111,6 +89,13 @@ config:
         enabled: true
       omni:
         enabled: true
+
+  # The factory needs a registry to push to. Turn one on, unless the operator
+  # already named an external registry this repo doesn't manage.
+  - name: registry
+    when: provisioning.image_factory.enabled == true && (provisioning.image_factory.registry.schematic.registry ?? '') == ''
+    value:
+      enabled: true
 
   # Bare hostnames (no port) for gateway HTTPRoute matching — sibling single-level
   # subdomains so they fit the gateway's own wildcard certificate SAN (*.<domain>),
@@ -230,30 +215,15 @@ flux:
       - "${gateway.enabled == true ? 'gateway-install' : ''}"
     # The chart reads the key from the data key `cache-signing.key`.
     secrets:
-      registry-s3:
-        data:
-          access_key: ${hetzner.object_storage.access_key ?? env("HETZNER_S3_ACCESS_KEY") ?? ''}
-          secret_key: ${hetzner.object_storage.secret_key ?? env("HETZNER_S3_SECRET_KEY") ?? ''}
       image-factory-cache-signing-key:
         data:
           cache-signing.key: ${provisioning.image_factory.cache_signing_key ?? terraform_output("image-factory-signing-key", "private_key_pem")}
     install:
       components:
         - image-factory
-        - "${(provisioning.image_factory.registry.schematic.registry ?? '') == '' ? 'registry' : ''}"
-        - "${(provisioning.image_factory.registry.schematic.registry ?? '') == '' && (object_store.driver == 'hetzner' || object_store.driver == 'aws') ? 'registry/s3' : ''}"
-        - "${(provisioning.image_factory.registry.schematic.registry ?? '') == '' && object_store.driver != 'hetzner' && object_store.driver != 'aws' ? 'registry/pvc' : ''}"
         - "${topology == 'ha' ? 'image-factory/ha' : ''}"
         - "${(telemetry.metrics.enabled ?? false) == true ? 'image-factory/prometheus' : ''}"
       substitutions:
-        # The same expression the terraform block above hands the bucket module, so
-        # the registry and the bucket that gets provisioned cannot drift apart.
-        registry_bucket: "${object_store.prefix}-image-factory"
-        registry_region: "${object_store.region ?? ''}"
-        registry_endpoint: "${object_store.endpoint ?? ''}"
-        registry_storage_class: "${cluster.storage.class ?? 'single'}"
-        registry_storage_size: "${provisioning.image_factory.registry_size ?? '10Gi'}"
-        registry_replicas: "${topology == 'ha' && (object_store.driver == 'hetzner' || object_store.driver == 'aws') ? 2 : 1}"
         external_domain: "${(dns.public_domain ?? '') == '' ? (dns.private_domain ?? dns.domain ?? '') : dns.public_domain}"
         # Explicit override wins; else derive from the domain the route publishes on.
         # docker-desktop reaches the gateway on 8443 rather than 443.
@@ -263,20 +233,21 @@ flux:
                   ? (dns.private_domain ?? dns.domain ?? '')
                   : dns.public_domain)
                 + (workstation.runtime == 'docker-desktop' ? ':8443' : ''))}
-        factory_schematic_registry: "${provisioning.image_factory.registry.schematic.registry ?? 'registry.provisioning.svc.cluster.local:5000'}"
+        # An explicit override wins; else read the registry capability's own config.
+        factory_schematic_registry: "${provisioning.image_factory.registry.schematic.registry ?? registry_effective.hostname}"
         factory_schematic_namespace: "${provisioning.image_factory.registry.schematic.namespace ?? 'siderolabs/image-factory'}"
         factory_schematic_repository: "${provisioning.image_factory.registry.schematic.repository ?? 'schematics'}"
-        factory_schematic_insecure: "${(provisioning.image_factory.registry.schematic.registry ?? '') == '' ? true : (provisioning.image_factory.registry.schematic.insecure ?? false)}"
+        factory_schematic_insecure: "${(provisioning.image_factory.registry.schematic.registry ?? '') == '' ? registry_effective.insecure : (provisioning.image_factory.registry.schematic.insecure ?? false)}"
         factory_max_concurrency: "${provisioning.image_factory.max_concurrency ?? 6}"
         factory_min_talos_version: "${provisioning.image_factory.min_talos_version ?? '1.2.0'}"
-        factory_cache_registry: "${provisioning.image_factory.registry.schematic.registry ?? 'registry.provisioning.svc.cluster.local:5000'}"
-        factory_cache_insecure: "${(provisioning.image_factory.registry.schematic.registry ?? '') == '' ? true : (provisioning.image_factory.registry.schematic.insecure ?? false)}"
+        factory_cache_registry: "${provisioning.image_factory.registry.schematic.registry ?? registry_effective.hostname}"
+        factory_cache_insecure: "${(provisioning.image_factory.registry.schematic.registry ?? '') == '' ? registry_effective.insecure : (provisioning.image_factory.registry.schematic.insecure ?? false)}"
         # Same registry as schematic/cache above — the chart's own default
         # (ghcr.io/siderolabs) is the upstream project's namespace, which a
         # self-hosted factory has no push credentials for.
-        factory_installer_registry: "${provisioning.image_factory.registry.schematic.registry ?? 'registry.provisioning.svc.cluster.local:5000'}"
+        factory_installer_registry: "${provisioning.image_factory.registry.schematic.registry ?? registry_effective.hostname}"
         factory_installer_repository: "${provisioning.image_factory.registry.installer.repository ?? 'installer'}"
-        factory_installer_insecure: "${(provisioning.image_factory.registry.schematic.registry ?? '') == '' ? true : (provisioning.image_factory.registry.schematic.insecure ?? false)}"
+        factory_installer_insecure: "${(provisioning.image_factory.registry.schematic.registry ?? '') == '' ? registry_effective.insecure : (provisioning.image_factory.registry.schematic.insecure ?? false)}"
       timeout: 10m
       interval: 5m
     resources:

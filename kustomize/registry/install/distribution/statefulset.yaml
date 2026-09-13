@@ -1,20 +1,20 @@
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
-  name: registry
-  namespace: provisioning
+  name: distribution
+  namespace: registry
 spec:
   # Not headless: nothing here needs per-pod DNS, and clusterIP is immutable on an
   # existing Service.
-  serviceName: registry
+  serviceName: distribution
   replicas: ${registry_replicas:-1}
   selector:
     matchLabels:
-      app.kubernetes.io/name: registry
+      app.kubernetes.io/name: distribution
   template:
     metadata:
       labels:
-        app.kubernetes.io/name: registry
+        app.kubernetes.io/name: distribution
     spec:
       securityContext:
         runAsNonRoot: true
@@ -23,7 +23,7 @@ spec:
         seccompProfile:
           type: RuntimeDefault
       containers:
-        - name: registry
+        - name: distribution
           # renovate: datasource=docker depName=distribution package=ghcr.io/distribution/distribution
           image: ghcr.io/distribution/distribution:3.0.0@sha256:4ba3adf47f5c866e9a29288c758c5328ef03396cb8f5f6454463655fa8bc83e2
           securityContext:

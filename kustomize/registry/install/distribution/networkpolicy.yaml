@@ -1,0 +1,23 @@
+# No route, no auth. Only image-factory's own pods, in their own namespace, may reach it.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: distribution
+  namespace: registry
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: distribution
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: provisioning
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: image-factory
+      ports:
+        - protocol: TCP
+          port: 5000
