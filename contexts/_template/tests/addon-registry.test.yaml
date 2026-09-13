@@ -395,10 +395,43 @@ cases:
             - components:
                 - harbor/oidc
 
-  # NOTE: no test for identity.enabled + gateway.enabled: false here yet — Core's
-  # keycloak/gateway route (unrelated to this facet) still dangles a dependsOn on
-  # gateway-resources against the currently-published core:latest, independent of
-  # Harbor entirely. Add once windsorcli/core#2675 merges and republishes.
+  # sso requires gateway.enabled, so no gateway means no oidc variant either —
+  # same as the opted-out case above, reached through a different condition.
+  - name: leaves harbor sso and its route out when identity is enabled without a gateway
+    values:
+      dev: true
+      platform: metal
+      network: *default-network
+      cluster: *default-cluster
+      gateway:
+        enabled: false
+      identity:
+        enabled: true
+      observability:
+        enabled: false
+      registry:
+        enabled: true
+        driver: harbor
+    expect:
+      flux:
+        - name: registry
+          dependsOn:
+            - pki-install
+            - registry-database-install
+          install:
+            components:
+              - harbor
+          resources:
+            - name: admin-jobs
+              components:
+                - harbor/gc
+    exclude:
+      flux:
+        - name: registry
+          resources:
+            - components:
+                - harbor/gateway
+                - harbor/oidc
 
   # driver defaults to harbor, so leaving it unset still resolves.
   # driver defaults to distribution — the cheap, anonymous option — not harbor.
