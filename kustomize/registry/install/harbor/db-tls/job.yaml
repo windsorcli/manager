@@ -1,0 +1,84 @@
+# Copies just ca.crt out of CNPG's own harbor-db-ca keypair Secret into a cert-only
+# Secret Harbor's chart can safely reference via caBundleSecretName -- that field
+# mounts the whole named Secret with no key restriction, so the keypair itself
+# never goes near Harbor's own pods.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: harbor-db-tls
+  namespace: registry
+  annotations:
+    kustomize.toolkit.fluxcd.io/force: enabled
+spec:
+  backoffLimit: 20
+  ttlSecondsAfterFinished: 86400
+  activeDeadlineSeconds: 2400
+  template:
+    spec:
+      serviceAccountName: harbor-db-tls
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      volumes:
+        - name: work
+          emptyDir:
+            medium: Memory
+            sizeLimit: 1Mi
+      containers:
+        - name: extract-db-ca-cert
+          # renovate: datasource=docker depName=kubectl package=alpine/k8s
+          image: alpine/k8s:1.37.0@sha256:b421c2e9419edb98db39b6ab641669f4db7bb2acf354f22450c6b7e7176d1ff4
+          volumeMounts:
+            - name: work
+              mountPath: /work
+          env:
+            - name: HOME
+              value: /work
+            - name: TMPDIR
+              value: /work
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -euo pipefail
+              umask 077
+              SOURCE_SECRET="harbor-db-ca"
+              TARGET_SECRET="harbor-db-ca-cert"
+
+              i=0
+              while :; do
+                if kubectl get secret "$${SOURCE_SECRET}" >/dev/null 2>&1; then
+                  break
+                fi
+                i=$$((i + 1))
+                if [ "$${i}" -ge 120 ]; then
+                  echo "timed out waiting for secret $${SOURCE_SECRET}" >&2
+                  exit 1
+                fi
+                sleep 5
+              done
+
+              kubectl get secret "$${SOURCE_SECRET}" -o jsonpath='{.data.ca\.crt}' \
+                | base64 -d > /work/ca.crt
+
+              kubectl create secret generic "$${TARGET_SECRET}" \
+                --from-file=ca.crt=/work/ca.crt \
+                --dry-run=client -o yaml | kubectl apply -f -
+              echo "wrote $${TARGET_SECRET}"
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 64Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+            seccompProfile:
+              type: RuntimeDefault

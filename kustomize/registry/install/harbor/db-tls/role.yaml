@@ -1,0 +1,20 @@
+# harbor-db-ca is CNPG's own generated keypair Secret (cert + private key). Harbor's
+# chart mounts whatever secret caBundleSecretName names with no key restriction, so
+# it never gets that Secret directly -- only the cert-only copy this Job writes.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: harbor-db-tls
+  namespace: registry
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames: ["harbor-db-ca"]
+    verbs: ["get"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["create"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames: ["harbor-db-ca-cert"]
+    verbs: ["get", "update", "patch"]
