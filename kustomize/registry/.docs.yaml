@@ -63,7 +63,7 @@ substitutions:
     description: "Whether GC also deletes untagged artifacts, from `registry.harbor.gc.delete_untagged`."
 
 components:
-  database:
+  harbor/database:
     enable_when: "`registry.driver` is `harbor` (default `distribution`)"
     description: "Dedicated CloudNativePG `Cluster` (`harbor-db`) — Harbor's Postgres, not the chart's bundled one."
   harbor/db-tls:

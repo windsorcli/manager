@@ -79,6 +79,10 @@ apply Harbor's HelmRelease until the CA cert already exists.
   matching its own name. Caught immediately by a live `ArtifactFailed: kustomization path not
   found` once tested against the real cluster, not by local blueprint tests, which don't
   validate that a named path actually resolves to a real directory.
+- `path:` on an `install:`-shaped entry always resolves to `kustomize/<path>/install` —
+  there's no way to point it at a `resources/` directory instead. `harbor-db` and `db-tls`
+  live under `kustomize/registry/install/harbor/`, alongside Harbor's other install-tier
+  pieces, not under `resources/` the way Core's Keycloak keeps its own CNPG Cluster.
 - Confirmed live end-to-end, not just via passing blueprint tests: `harbor-core`'s own boot log
   reads `sslmode-"verify-full"` followed by a successful migration, and the Harbor API responds
   normally afterward.
