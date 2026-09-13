@@ -11,6 +11,8 @@ rules:
     resources: ["secrets"]
     resourceNames: ["harbor-db-ca"]
     verbs: ["get"]
+  # RBAC can't scope create by resourceNames (the object doesn't exist yet at
+  # authorization time), so this grants create on any Secret in this namespace.
   - apiGroups: [""]
     resources: ["secrets"]
     verbs: ["create"]
