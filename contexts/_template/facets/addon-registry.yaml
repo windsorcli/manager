@@ -112,10 +112,33 @@ config:
 #
 flux:
 
+  # install:, not resources: -- resources: entries auto-depend on their own
+  # facet's install, which would cycle with registry's own dependsOn below.
+  - name: registry-database
+    when: (registry.driver ?? 'distribution') == 'harbor'
+    path: registry
+    dependsOn:
+      - database-install
+    install:
+      components:
+        - harbor/database
+        - "${topology == 'ha' ? 'harbor/database/ha' : ''}"
+        - harbor/db-tls
+      substitutions:
+        harbor_db_storage_size: "${registry.harbor.db_storage_size ?? '5Gi'}"
+      healthCheckExprs:
+        - apiVersion: postgresql.cnpg.io/v1
+          kind: Cluster
+          current: status.conditions.exists(e, e.type == 'Ready' && e.status == 'True')
+      # At least the db-tls Job's own activeDeadlineSeconds (40m).
+      timeout: 40m
+      interval: 5m
+
   - name: registry
     dependsOn:
       - "${(registry.driver ?? 'distribution') == 'harbor' ? 'pki-install' : ''}"
-      - "${(registry.driver ?? 'distribution') == 'harbor' ? 'database-install' : ''}"
+      # Flux's Helm controller rolls back if the Deployment stalls on a missing Secret.
+      - "${(registry.driver ?? 'distribution') == 'harbor' ? 'registry-database-install' : ''}"
       - "${(registry.driver ?? 'distribution') == 'harbor' && gateway.enabled == true ? 'gateway-install' : ''}"
     secrets:
       harbor-admin-password:
@@ -136,7 +159,6 @@ flux:
           secret_key: ${hetzner.object_storage.secret_key ?? env("HETZNER_S3_SECRET_KEY") ?? ''}
     install:
       components:
-        - "${(registry.driver ?? 'distribution') == 'harbor' ? 'database' : ''}"
         - "${(registry.driver ?? 'distribution') == 'harbor' ? 'harbor' : ''}"
         - "${(registry.driver ?? 'distribution') == 'harbor' && (object_store.driver == 'hetzner' || object_store.driver == 'aws') ? 'harbor/s3' : ''}"
         - "${(registry.driver ?? 'distribution') == 'harbor' && (telemetry.metrics.enabled ?? false) == true ? 'harbor/prometheus' : ''}"

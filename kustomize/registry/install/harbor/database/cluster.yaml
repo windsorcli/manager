@@ -1,0 +1,23 @@
+---
+# initdb creates the `harbor` database and role, published via `harbor-db-app`
+# and `harbor-db-rw`.
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: harbor-db
+  namespace: registry
+spec:
+  # Single instance by default; the ha/ overlay scales this under topology: ha.
+  instances: 1
+  storage:
+    size: ${harbor_db_storage_size:-5Gi}
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      memory: 512Mi
+  bootstrap:
+    initdb:
+      database: harbor
+      owner: harbor

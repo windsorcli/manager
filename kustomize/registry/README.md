@@ -50,6 +50,7 @@ Factory's own route already sets.
 | `harbor_hostname` | `registry.driver` is `harbor` | Base hostname Harbor's UI/API advertises, from `registry.harbor.hostname` or derived as `harbor.<domain>`. Includes the docker-desktop `:8443` port suffix where the chart's own `externalURL` needs it. |
 | `harbor_storage_class` | `registry.driver` is `harbor` | Storage class for the registry PVC when no object store backs it. Defaults to `cluster.storage.class`, or `single`. |
 | `harbor_registry_size` | `registry.driver` is `harbor` | Size of the registry PVC when no object store backs it. Defaults to `20Gi`. |
+| `harbor_db_storage_size` | `registry.driver` is `harbor` | Size of the PVC backing Harbor's dedicated CNPG database, from `registry.harbor.db_storage_size`. Defaults to `5Gi`. |
 | `harbor_registry_bucket` | `harbor/s3` | Bucket backing Harbor's registry. Built from `object_store.prefix`, the same expression the object-store Terraform module provisions. |
 | `harbor_registry_region` | `harbor/s3` | Region embedded in the S3 v4 signature, from `object_store.region`. |
 | `harbor_registry_endpoint` | `harbor/s3` | S3 endpoint Harbor's registry writes to, from `object_store.endpoint`. |
@@ -71,7 +72,9 @@ Factory's own route already sets.
 
 | Component | Enable when | Effect |
 |---|---|---|
-| `database` | `registry.driver` is `harbor` (default `distribution`) | Dedicated CloudNativePG `Cluster` (`harbor-db`) — Harbor's Postgres, not the chart's bundled one. |
+| `harbor/database` | `registry.driver` is `harbor` (default `distribution`) | Dedicated CloudNativePG `Cluster` (`harbor-db`) — Harbor's Postgres, not the chart's bundled one. |
+| `harbor/database/ha` | `registry.driver` is `harbor` and `topology: ha` | Scales the CloudNativePG `Cluster` to 3 instances with required pod anti-affinity, so each Postgres instance lands on a distinct node. |
+| `harbor/db-tls` | `registry.driver` is `harbor` (default `distribution`) | Copies `ca.crt` out of CNPG's `harbor-db-ca` keypair Secret into a cert-only `harbor-db-ca-cert` Secret, so Harbor's `caBundleSecretName` (which mounts the whole named Secret with no key restriction) never gets the private key too. Backs `sslmode: verify-full` on Harbor's database connection. |
 | `harbor` | `registry.driver` is `harbor` (default `distribution`) | Helm release of the official `goharbor/harbor-helm` chart in `harbor`. Local admin auth. |
 | `harbor/s3` | `registry.driver` is `harbor` and `object_store.driver` is `hetzner` or `aws` | Backs Harbor with a bucket from the platform's object store instead of a PVC. Own bucket, own destroy policy — not shared with the distribution driver's. |
 | `harbor/oidc` | `registry.driver` is `harbor`, `identity.enabled == true`, and `registry.harbor.sso` is not explicitly false | Admin-API Job that registers Harbor's OIDC client in the platform realm and configures Harbor for OIDC auth, group-mapped to `platform-admins`. A named `oidc` resources variant of the `registry` flux system (`registry-resources-oidc`) so it depends on identity without gating Harbor's install or gateway route. |

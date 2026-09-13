@@ -44,14 +44,24 @@ cases:
         driver: harbor
     expect:
       flux:
+        - name: registry-database
+          dependsOn:
+            - database-install
+          install:
+            components:
+              - harbor/database
+              - harbor/db-tls
+            substitutions:
+              harbor_db_storage_size: 5Gi
+            timeout: 40m
+            interval: 5m
         - name: registry
           dependsOn:
             - pki-install
-            - database-install
+            - registry-database-install
             - gateway-install
           install:
             components:
-              - database
               - harbor
             substitutions:
               harbor_hostname: harbor.test
@@ -82,6 +92,45 @@ cases:
           resources:
             - components:
                 - harbor/proxy-cache
+
+  - name: sets a custom harbor database storage size
+    values:
+      dev: true
+      platform: metal
+      network: *default-network
+      cluster: *default-cluster
+      gateway: *default-gateway
+      registry:
+        enabled: true
+        driver: harbor
+        harbor:
+          db_storage_size: 20Gi
+    expect:
+      flux:
+        - name: registry-database
+          install:
+            substitutions:
+              harbor_db_storage_size: 20Gi
+
+  - name: scales the harbor database under ha topology
+    values:
+      dev: true
+      platform: metal
+      topology: ha
+      network: *default-network
+      cluster: *default-cluster
+      gateway: *default-gateway
+      registry:
+        enabled: true
+        driver: harbor
+    expect:
+      flux:
+        - name: registry-database
+          install:
+            components:
+              - harbor/database
+              - harbor/database/ha
+              - harbor/db-tls
 
   # A configured proxy_cache entry lands in the same admin-jobs Kustomization gc
   # already uses (identical dependsOn, gc is still on by default here) — not a
@@ -160,7 +209,6 @@ cases:
         - name: registry
           install:
             components:
-              - database
               - harbor
     exclude:
       flux:
@@ -232,11 +280,10 @@ cases:
         - name: registry
           dependsOn:
             - pki-install
-            - database-install
+            - registry-database-install
             - gateway-install
           install:
             components:
-              - database
               - harbor
           resources:
             - components:
@@ -301,7 +348,6 @@ cases:
         - name: registry
           install:
             components:
-              - database
               - harbor
           resources:
             - components:
@@ -338,7 +384,6 @@ cases:
         - name: registry
           install:
             components:
-              - database
               - harbor
           resources:
             - components:
@@ -384,6 +429,7 @@ cases:
           install:
             components:
               - database
+              - harbor/db-tls
               - harbor
           resources:
             - components:
@@ -449,7 +495,6 @@ cases:
         - name: registry
           install:
             components:
-              - database
               - harbor
 
   # Explicit hostname override flows through the install-tier substitution.
@@ -506,7 +551,6 @@ cases:
         - name: registry
           install:
             components:
-              - database
               - harbor
               - harbor/s3
             substitutions:
@@ -562,7 +606,6 @@ cases:
         - name: registry
           install:
             components:
-              - database
               - harbor
               - harbor/s3
             substitutions:
@@ -622,10 +665,9 @@ cases:
         - name: registry
           dependsOn:
             - pki-install
-            - database-install
+            - registry-database-install
           install:
             components:
-              - database
               - harbor
           resources:
             - name: admin-jobs
@@ -659,7 +701,6 @@ cases:
         - name: registry
           install:
             components:
-              - database
               - harbor
               - harbor/prometheus
         - name: manager-observability
@@ -689,7 +730,6 @@ cases:
         - name: registry
           install:
             components:
-              - database
               - harbor
     exclude:
       flux:

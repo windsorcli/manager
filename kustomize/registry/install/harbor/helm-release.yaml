@@ -35,9 +35,8 @@ spec:
       tls:
         enabled: false
 
-    # Dedicated CNPG Cluster (install/database/database.yaml), not the chart's bundled
-    # Postgres. sslmode stays disable: unlike Keycloak's CR, this chart has no CA-bundle
-    # field to trust CNPG's own cluster CA with.
+    # Dedicated CNPG Cluster (install/harbor/database/cluster.yaml), not the chart's bundled
+    # Postgres. No database-specific CA field, so caBundleSecretName below carries it.
     database:
       type: external
       external:
@@ -46,7 +45,11 @@ spec:
         username: harbor
         coreDatabase: harbor
         existingSecret: harbor-db-app
-        sslmode: disable
+        sslmode: verify-full
+
+    # Injected into core/jobservice/registry/trivy's shared trust store. Only ever
+    # used for the database connection above today.
+    caBundleSecretName: harbor-db-ca-cert
 
     # Bundled Redis — cache/session/job-queue only, nothing that needs to survive a
     # restart the way the database or registry blobs do.

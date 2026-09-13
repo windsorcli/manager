@@ -13,6 +13,9 @@ substitutions:
   harbor_registry_size:
     required_when: "`registry.driver` is `harbor`"
     description: "Size of the registry PVC when no object store backs it. Defaults to `20Gi`."
+  harbor_db_storage_size:
+    required_when: "`registry.driver` is `harbor`"
+    description: "Size of the PVC backing Harbor's dedicated CNPG database, from `registry.harbor.db_storage_size`. Defaults to `5Gi`."
   harbor_registry_bucket:
     required_when: "`harbor/s3`"
     description: "Bucket backing Harbor's registry. Built from `object_store.prefix`, the same expression the object-store Terraform module provisions."
@@ -63,9 +66,15 @@ substitutions:
     description: "Whether GC also deletes untagged artifacts, from `registry.harbor.gc.delete_untagged`."
 
 components:
-  database:
+  harbor/database:
     enable_when: "`registry.driver` is `harbor` (default `distribution`)"
     description: "Dedicated CloudNativePG `Cluster` (`harbor-db`) — Harbor's Postgres, not the chart's bundled one."
+  harbor/database/ha:
+    enable_when: "`registry.driver` is `harbor` and `topology: ha`"
+    description: "Scales the CloudNativePG `Cluster` to 3 instances with required pod anti-affinity, so each Postgres instance lands on a distinct node."
+  harbor/db-tls:
+    enable_when: "`registry.driver` is `harbor` (default `distribution`)"
+    description: "Copies `ca.crt` out of CNPG's `harbor-db-ca` keypair Secret into a cert-only `harbor-db-ca-cert` Secret, so Harbor's `caBundleSecretName` (which mounts the whole named Secret with no key restriction) never gets the private key too. Backs `sslmode: verify-full` on Harbor's database connection."
   harbor:
     enable_when: "`registry.driver` is `harbor` (default `distribution`)"
     description: "Helm release of the official `goharbor/harbor-helm` chart in `harbor`. Local admin auth."
