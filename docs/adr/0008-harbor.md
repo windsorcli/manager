@@ -1,6 +1,6 @@
 ---
 title: "ADR-0008: Harbor — a fleet registry, not another bare distribution cache"
-description: "Image Factory's own facet already names the gap it's working around: its in-cluster registry is a bare `distribution` cache with no scanning, no RBAC, no UI, and no replication, and its docs say plainly that once Manager's Harbor lands, the factory points at it instead. This ADR picks Harbor (the official `goharbor/harbor-helm` chart) as that fleet-wide registry, deployed the same way every other stateful addon in this repo is: a dedicated CloudNativePG Postgres Cluster (Keycloak's own precedent, not the chart's bundled database), object_store-backed S3 storage in its own bucket (not shared with Image Factory's), the chart's bundled Redis (no shared-Redis precedent exists to build on, and Redis holds nothing that needs to survive a restart), and exposure through the shared gateway. SSO against Core's Keycloak realm ships alongside the initial deployment, wired through an admin-API Job the same shape Omni's own SAML client registration uses (Harbor has no CRD/values-level OIDC). Deferred: migrating Image Factory's own registry onto Harbor, and scheduled garbage collection — each waits on Harbor being proven reachable and authenticated first, the same phasing discipline ADR-0004 used for Omni. Proxy-cache projects (the reduced-egress/air-gapped motivation) are now built — see the update below."
+description: "Image Factory's own facet already names the gap it's working around: its in-cluster registry is a bare `distribution` cache with no scanning, no RBAC, no UI, and no replication, and its docs say plainly that once Manager's Harbor lands, the factory points at it instead. This ADR picks Harbor (the official `goharbor/harbor-helm` chart) as that fleet-wide registry, deployed the same way every other stateful addon in this repo is: a dedicated CloudNativePG Postgres Cluster (Keycloak's own precedent, not the chart's bundled database), object_store-backed S3 storage in its own bucket (not shared with Image Factory's), the chart's bundled Redis (no shared-Redis precedent exists to build on, and Redis holds nothing that needs to survive a restart), and exposure through the shared gateway. SSO against Core's Keycloak realm ships alongside the initial deployment, wired through an admin-API Job the same shape Omni's own SAML client registration uses (Harbor has no CRD/values-level OIDC). Deferred: migrating Image Factory's own registry onto Harbor, which waits on Harbor being proven reachable and authenticated first, the same phasing discipline ADR-0004 used for Omni. Proxy-cache projects and scheduled garbage collection (the other two originally-deferred items) are now built — see the updates below."
 ---
 
 # ADR-0008: Harbor — a fleet registry, not another bare distribution cache
@@ -45,13 +45,14 @@ directly.
 ## Decision
 
 **1. Deploy Harbor via the official `goharbor/harbor-helm` chart, with SSO shipped
-alongside it and three items still deferred.** Delivered: Harbor up, reachable through the
-gateway, SSO against Keycloak wired the same way Omni's own SAML client registration is
-(decision 6). Deferred: proxy-cache projects for reduced egress, Image Factory's registry
-migrated onto Harbor, and scheduled garbage collection — each waits on Harbor being proven
-reachable and authenticated first. This is the same phasing discipline ADR-0004 used for
-Omni —
-land the reachable thing, defer what depends on it being proven — not a new pattern.
+alongside it and three items originally deferred.** Delivered: Harbor up, reachable through
+the gateway, SSO against Keycloak wired the same way Omni's own SAML client registration is
+(decision 6). Deferred at the time: proxy-cache projects for reduced egress, Image Factory's
+registry migrated onto Harbor, and scheduled garbage collection — each waited on Harbor being
+proven reachable and authenticated first. This is the same phasing discipline ADR-0004 used
+for Omni — land the reachable thing, defer what depends on it being proven — not a new
+pattern. Of the three, only the Image Factory migration is still deferred; see the updates
+below for the other two.
 
 **Update: proxy-cache projects, built.** `registry.harbor.proxy_cache` creates a Harbor
 Registry endpoint plus a proxy-cache Project for each configured upstream, via an
@@ -60,6 +61,14 @@ management). Confirmed against the pinned chart's Harbor version (2.15.2, chart 
 directly in `goharbor/harbor`'s own source: `github-ghcr` is a first-class adapter
 (`src/pkg/reg/adapter/githubcr`), resolving the doubt the original Consequences section
 raised below.
+
+**Update: scheduled garbage collection, built.** `registry.harbor.gc` sets Harbor's own GC
+schedule via its admin API (`PUT`/`POST /system/gc/schedule`); Harbor's jobservice runs GC on
+that schedule from then on, the same "configure once" shape `harbor/oidc` and
+`harbor/proxy-cache` use. On by default (daily). Confirmed live against a real Harbor: the
+schedule-status endpoint returns an empty 200 body, not `{}`, when no schedule was ever set,
+and `job_parameters` on read is a JSON-encoded string, not a nested object — both undocumented
+in Harbor's own API spec, only found by testing against the real API.
 
 The schema is `registry.enabled` / `registry.driver` (default `harbor`) /
 `registry.harbor.*`, not a flat `harbor.*` key — capability-plus-driver, the same shape
@@ -119,13 +128,20 @@ per-bucket map.
 Gateway** — the same posture every other addon here uses (Keycloak, Grafana, Image Factory,
 Omni), not Harbor's own ingress-oriented defaults. Needs explicit long timeouts on the
 HTTPRoute for blob pushes, the same `timeouts: {request: 5m, backendRequest: 5m}` shape
-Image Factory's own route already sets. **Open implementation risk, not resolved by this
-ADR**: nginx's `proxy-body-size: 0` (unlimited chunked-upload body) has no confirmed Gateway
-API/Envoy/Cilium equivalent yet — needs a spike against both gateway drivers before this is
-considered done, not a design decision to guess at here. The gateway route is its own
-resources variant, not a `requires:` on installing Harbor at all — the same shape
-`addon-observability.yaml` uses for Grafana's own route, so Harbor still installs without a
-gateway (reachable by port-forwarding the `harbor` Service) rather than failing composition.
+Image Factory's own route already sets. The gateway route is its own resources variant, not a
+`requires:` on installing Harbor at all — the same shape `addon-observability.yaml` uses for
+Grafana's own route, so Harbor still installs without a gateway (reachable by port-forwarding
+the `harbor` Service) rather than failing composition.
+
+**Update: the chunked-upload body-size risk is resolved, no config needed.** Confirmed live
+against the Envoy driver: a 300MB blob, pushed as a single `PATCH` with genuine
+`Transfer-Encoding: chunked` and no `Content-Length` (the exact shape nginx-ingress needed
+`proxy-body-size: 0` for), completed through the `external` Gateway with no size cap, no
+truncation, and a byte-for-byte matching digest on pull-back. Envoy streams request bodies
+through rather than buffering them whole the way nginx does, so there's no nginx-style limit to
+raise in the first place. Not re-tested against the Cilium driver — Cilium's own Gateway API
+implementation also proxies through Envoy, so the same result is expected, but that's an
+inference, not a confirmed test.
 
 **6. SSO is an admin-API Job, not a Helm value — Harbor's chart has no OIDC configuration
 surface at all.** Unlike Keycloak's `KeycloakRealmImport` CRD, turning Harbor's auth mode to
@@ -174,6 +190,10 @@ secret in this repo is — SSO adds a second login path, it doesn't replace the 
   the pinned chart version, not a community workaround. Downstream clusters still have to
   be pointed at the resulting proxy-cache project themselves — this ADR only gets Harbor
   ready to serve one.
+- Resolved: decision 5's chunked-upload body-size risk needed no fix. Envoy streams request
+  bodies rather than buffering them the way nginx does, so there was never a limit to raise.
+  Confirmed against the Envoy driver only — the Cilium driver is expected to behave the same
+  way (it also proxies through Envoy) but hasn't been tested directly.
 - ADR-0007 (Manager's own state, not yet written) now has a second Postgres Cluster and a
   second bucket to account for, alongside Omni's etcd and the identity database.
 
@@ -194,8 +214,8 @@ actually wants.
 **OIDC from day one, no local-admin phase.** Rejected as the wrong order of operations for
 the same reason ADR-0004 phased Omni's HA/backup out: Harbor's OIDC path is a Job-based
 integration with no chart-level shortcut, and building it before Harbor itself is confirmed
-reachable through the gateway (including the unresolved body-size/timeout question in
-decision 5) means debugging two unproven things at once instead of one at a time.
+reachable through the gateway (including the body-size/timeout question decision 5 later
+resolved) means debugging two unproven things at once instead of one at a time.
 
 **An external, shared Redis addon.** Rejected as premature — no consumer in this repo runs
 Redis today, Harbor's own Redis holds nothing precious, and standing up shared infrastructure
