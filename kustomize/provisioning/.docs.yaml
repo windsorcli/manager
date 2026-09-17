@@ -92,7 +92,7 @@ components:
         enable_when: "`telemetry.metrics.enabled == true`"
         description: "Metrics Service on :2122 plus a ServiceMonitor. Both are needed — the chart leaves the metrics Service off by default, so a ServiceMonitor alone would have nothing to scrape."
       gateway:
-        enable_when: "gateway is enabled"
+        enable_when: "always (`gateway.enabled ?? ingress.enabled ?? true`, so this defaults on)"
         description: "HTTPRoute on Core's canonical `external` Gateway, attached to both the web-http and web-https listeners. One route serves both gateway drivers, since envoy and cilium each implement Gateway API. Lives in the resources tier and depends on `gateway-resources`."
       harbor-auth:
         enable_when: "the registry capability's driver is harbor"
@@ -117,7 +117,7 @@ components:
         description: "Dedicated LoadBalancer Service for SideroLink WireGuard."
       exporter:
         enable_when: "metrics are enabled and `provisioning.omni.service_account_key` is set"
-        description: "omni_exporter Deployment. Off until an admin creates the Reader-role service account by hand and hands the key to Windsor via a secret() reference."
+        description: "omni_exporter Deployment, Service, and ServiceMonitor. Off until an admin creates the Reader-role service account by hand and hands the key to Windsor via a secret() reference."
       gateway:
         enable_when: "always"
         description: "HTTPRoutes on Core's canonical `external` Gateway for Omni's UI/API, Kubernetes proxy, and SideroLink machine API. Lives in the resources tier and depends on `gateway-resources`."

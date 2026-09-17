@@ -15,8 +15,9 @@ Installs the official `goharbor/harbor-helm` chart. Hard dependencies:
   database. `sslmode` stays `disable`: this chart has no CA-bundle field for CNPG's cluster
   CA.
 - **Auth.** A local admin password outside dev mode, or SSO against Keycloak (`harbor/oidc`,
-  an admin-API Job). Set `registry.harbor.sso` to `false` to keep local-admin auth with
-  identity enabled.
+  an admin-API Job). SSO needs hosted Keycloak (`identity.driver: keycloak`) and a gateway —
+  the Job registers a redirect URI on Harbor's gateway route. Set `registry.harbor.sso` to
+  `false` to keep local-admin auth with identity enabled.
 - **A gateway.** Harbor's UI/API reach Core's canonical `external` Gateway. TLS terminates
   there; Harbor serves plain HTTP.
 
@@ -96,9 +97,9 @@ Backs Harbor with a bucket from the platform's object store instead of a PVC. Ow
 
 ### `harbor/oidc`
 
-_Enabled when `registry.driver` is `harbor`, `identity.enabled == true`, and `registry.harbor.sso` is not explicitly false._
+_Enabled when `registry.driver` is `harbor`, `identity.enabled == true`, `identity.driver` is `keycloak`, `gateway.enabled == true`, and `registry.harbor.sso` is not explicitly false._
 
-Admin-API Job that registers Harbor's OIDC client in the platform realm and configures Harbor for OIDC auth, group-mapped to `platform-admins`. A named `oidc` resources variant of the `registry` flux system (`registry-resources-oidc`) so it depends on identity without gating Harbor's install or gateway route.
+Admin-API Job that registers Harbor's OIDC client in the platform realm and configures Harbor for OIDC auth, group-mapped to `platform-admins`. Needs hosted Keycloak and a gateway, since the Job registers a redirect URI on Harbor's gateway route. A named `oidc` resources variant of the `registry` flux system (`registry-resources-oidc`) so it depends on identity without gating Harbor's install or gateway route.
 
 ### `harbor/gateway`
 
@@ -123,6 +124,12 @@ Admin-API Job that sets Harbor's own GC schedule via its admin API. Harbor's job
 _Enabled when `registry.driver` is `harbor` and `provisioning.image_factory.enabled == true`._
 
 Admin-API Job that creates an `image-factory` Harbor project and a scoped push/pull robot account, then writes a dockerconfigjson Secret in `provisioning` for the factory's own pod to mount. Needs RBAC to write that Secret cross-namespace — the only admin-API Job here that talks to the Kubernetes API, not just Harbor's.
+
+### `harbor/prometheus`
+
+_Enabled when `registry.driver` is `harbor` and `telemetry.metrics.enabled == true`._
+
+Turns on the chart's own `metrics` block plus a ServiceMonitor (30s interval). The chart adds a `/metrics` port to each component's existing Service rather than a dedicated metrics Service; everything scrapes under one `job=harbor`.
 
 ### `distribution`
 
@@ -179,10 +186,3 @@ registry:
   harbor:
     admin_password: ${secret("Developer", "harbor", "admin_password")}
 ```
-
-## Not yet built
-
-- **Image Factory migration.** Image Factory's own `registry` component keeps running
-  independently for now, so two OCI registries coexist.
-- **Garbage collection scheduling.** Harbor's GC is a REST API call, not a standalone
-  binary. It needs a CronJob, like the OIDC bootstrap Job.

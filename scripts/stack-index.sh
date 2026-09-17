@@ -139,10 +139,38 @@ build_half() {
   fi
 }
 
+# Validate that $INDEX_FILE opens with an H1 and a non-empty lede paragraph
+# before the Stack section. The site's parseIndex() only captures a
+# blueprint's /catalog tile name and summary when it finds an H1 first,
+# then a paragraph — missing either comes back as an empty string, with no
+# build error, just a blank tile. Unlike every other README in this repo,
+# this file's H1 is not a duplicate of the frontmatter title: it's parsed
+# data, and a "strip the duplicate H1" pass must not touch it.
+check_h1_and_lede() {
+  local body h1_line lede_line
+  body="$(awk 'NR==1 && $0=="---"{fm=1; next} fm && $0=="---"{fm=0; rest=1; next} rest' "$INDEX_FILE")"
+
+  h1_line="$(printf '%s\n' "$body" | awk '/^$/{next} {print; exit}')"
+  if [[ "$h1_line" != "# "* ]]; then
+    echo "error: $INDEX_FILE must open with an H1 (# <Blueprint name>) right after its frontmatter — parseIndex() reads it for the /catalog tile name. Found: '${h1_line:-<empty>}'" >&2
+    return 1
+  fi
+
+  lede_line="$(printf '%s\n' "$body" | awk -v begin="$BEGIN_MARKER" '
+    seen_h1 { if ($0=="") next; if ($0 ~ /^#/ || $0==begin) exit; print; exit }
+    /^# / { seen_h1=1 }
+  ')"
+  if [ -z "$lede_line" ]; then
+    echo "error: $INDEX_FILE needs a lede paragraph between its H1 and the Stack section — parseIndex() reads it for the /catalog tile summary." >&2
+    return 1
+  fi
+}
+
 TMP="$(mktemp)"
 trap 'rm -f "$TMP"' EXIT
 
 ERRORS=0
+check_h1_and_lede || ERRORS=1
 {
   echo "$BEGIN_MARKER"
   echo

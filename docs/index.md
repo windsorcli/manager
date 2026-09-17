@@ -3,10 +3,13 @@ title: Manager
 description: Management cluster blueprint layered on top of core.
 ---
 
+# Manager
+
 Manager is a Windsor blueprint for a management cluster. It layers on top of
 [Core](https://github.com/windsorcli/core), which provides the Kubernetes
-platform, and adds the control-plane services that operate a fleet of downstream
-clusters: self-hosted Omni, the Talos image factory, Harbor, and Cluster API.
+platform, and adds the control-plane services that operate a fleet of
+downstream clusters. Includes self-hosted Omni, the Talos image factory,
+Harbor, and Cluster API.
 
 <!-- BEGIN_STACK_INDEX -->
 
@@ -37,8 +40,6 @@ clusters: self-hosted Omni, the Talos image factory, Harbor, and Cluster API.
 
 ## Configuration
 
-The blueprint is built out progressively — Cluster API is on the roadmap but
-not yet a component above. Manager is configured through `values.yaml` for
-the current context, the same as Core. See the
-[README](https://github.com/windsorcli/manager) for the current state and
-the target service set.
+Manager is configured through `values.yaml` for the current context, the
+same as Core. See the [README](https://github.com/windsorcli/manager) for
+the full service set.

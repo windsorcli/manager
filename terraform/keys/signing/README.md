@@ -1,5 +1,5 @@
 ---
-title: keys/signing
+title: Signing
 description: Generates an ECDSA signing key held in Terraform state.
 ---
 

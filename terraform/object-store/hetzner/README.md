@@ -1,5 +1,5 @@
 ---
-title: object-store/hetzner
+title: Hetzner
 description: Creates buckets in Hetzner Object Storage.
 ---
 

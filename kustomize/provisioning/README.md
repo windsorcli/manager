@@ -20,8 +20,10 @@ reaching the public factory.
 Installs the Sidero Labs `image-factory` chart from `oci://ghcr.io/siderolabs/charts`. Hard
 dependencies:
 
-- **A schematic registry.** The operator supplies one; the chart's `registry.example.com`
-  default fails at runtime, so this facet requires a real value.
+- **A schematic registry.** The in-cluster `registry` component backs this by default
+  (`registry.provisioning.svc.cluster.local:5000`, plain HTTP, no route). Name an external
+  registry under `provisioning.image_factory.registry.schematic.registry` and the in-cluster
+  one is left out entirely; the chart's own `registry.example.com` default is never used.
 - **A cache signing key.** Signs cached assets so nodes can verify them. `keys/signing`
   generates one (ECDSA P-256) by default; set `cache_signing_key` to supply your own.
   Rotating the key invalidates assets already signed with the old one.
@@ -30,25 +32,27 @@ dependencies:
 
 ```mermaid
 flowchart LR
+  base[provisioning-base<br/>Namespace + siderolabs HelmRepository]
   flux[Flux helm-controller]
 
   subgraph systemfactory[image-factory]
     hr[HelmRelease image-factory]
-    pod[Image Factory Deployment<br/>UI · API · PXE · registry]
+    pod[Image Factory Deployment<br/>UI · API · registry frontends]
     secret[Secret<br/>cache-signing.key]
   end
 
-  schematic[(Schematic registry<br/>OCI, push access)]
-  cache[(Asset cache<br/>OCI registry or S3)]
+  reg[(registry<br/>in-cluster OCI · PVC or object-store)]
+  extreg[(External registry<br/>opt-in override)]
   upstream[(ghcr.io/siderolabs<br/>imager · installer · extensions)]
   gw[Core gateway<br/>external · Gateway API]
   machines[Talos machines]
 
+  base -.dependsOn.-> systemfactory
   flux ==> hr
   hr --> pod
   secret -.mounted.-> pod
-  pod -->|push/pull schematics| schematic
-  pod -->|cache built assets| cache
+  pod -->|schematics · asset cache · installers| reg
+  pod -.optional override.-> extreg
   pod -->|pull base images| upstream
   gw -->|route| pod
   machines -->|download installers| gw
@@ -89,6 +93,10 @@ dependencies:
   `provisioning.omni.initial_admins`.
 - **A gateway.** Omni's UI/API, Kubernetes proxy, and SideroLink machine API all reach
   Core's canonical `external` Gateway.
+- **A SideroLink advertised endpoint,** on a cloud load-balancer platform (AWS, Hetzner,
+  Azure), whenever Windsor can't derive one on its own. This needs two applies: bootstrap
+  once to get a load-balancer IP, set `provisioning.omni.wireguard.advertised_endpoint` to
+  `<that IP>:30180`, then apply again.
 
 ### Routing
 
@@ -100,10 +108,10 @@ get the dedicated-Gateway path yet.
 
 ### Image factory integration
 
-Omni's `config.registries.imageFactoryBaseURL` points at Manager's own image factory when
-`provisioning.image_factory.enabled == true`, or the public `https://factory.talos.dev`
-otherwise. Used both for Omni's own reconciliation and the download links it hands an
-operator's browser.
+Omni's `config.registries.imageFactoryBaseURL` takes `provisioning.image_factory.external_url`
+when set, otherwise Manager's own image factory when `provisioning.image_factory.enabled == true`,
+otherwise the public `https://factory.talos.dev`. Used both for Omni's own reconciliation and
+the download links it hands an operator's browser.
 
 ## Configuration
 
@@ -161,7 +169,7 @@ Helm release of the Sidero Labs `image-factory` chart in `provisioning`, from `o
 |---|---|---|
 | `ha` | `topology == 'ha'` | Two replicas with pod anti-affinity across nodes. Redundancy against node loss only — the Recreate strategy means rollouts still have a gap. Safe because builds are stateless: schematics live in the registry, cached assets in the cache backend. |
 | `prometheus` | `telemetry.metrics.enabled == true` | Metrics Service on :2122 plus a ServiceMonitor. Both are needed — the chart leaves the metrics Service off by default, so a ServiceMonitor alone would have nothing to scrape. |
-| `gateway` | gateway is enabled | HTTPRoute on Core's canonical `external` Gateway, attached to both the web-http and web-https listeners. One route serves both gateway drivers, since envoy and cilium each implement Gateway API. Lives in the resources tier and depends on `gateway-resources`. |
+| `gateway` | always (`gateway.enabled ?? ingress.enabled ?? true`, so this defaults on) | HTTPRoute on Core's canonical `external` Gateway, attached to both the web-http and web-https listeners. One route serves both gateway drivers, since envoy and cilium each implement Gateway API. Lives in the resources tier and depends on `gateway-resources`. |
 | `harbor-auth` | the registry capability's driver is harbor | Mounts the dockerconfigjson Secret `harbor/image-factory` writes (kustomize/registry/) and points `DOCKER_CONFIG` at it, so the chart's own OCI client authenticates its pushes. |
 
 ## Components — `omni`
@@ -178,7 +186,7 @@ Helm release of the Sidero Labs `omni` chart in `provisioning`, from `oci://ghcr
 | `prometheus` | `telemetry.metrics.enabled == true` | Metrics Service and ServiceMonitor for Omni's native metrics. |
 | `nodeport` | NodePort load-balancer mode (e.g. docker-desktop) | Dedicated NodePort Service for SideroLink WireGuard. |
 | `loadbalancer` | load-balancer mode and the gateway driver isn't cilium | Dedicated LoadBalancer Service for SideroLink WireGuard. |
-| `exporter` | metrics are enabled and `provisioning.omni.service_account_key` is set | omni_exporter Deployment. Off until an admin creates the Reader-role service account by hand and hands the key to Windsor via a secret() reference. |
+| `exporter` | metrics are enabled and `provisioning.omni.service_account_key` is set | omni_exporter Deployment, Service, and ServiceMonitor. Off until an admin creates the Reader-role service account by hand and hands the key to Windsor via a secret() reference. |
 | `gateway` | always | HTTPRoutes on Core's canonical `external` Gateway for Omni's UI/API, Kubernetes proxy, and SideroLink machine API. Lives in the resources tier and depends on `gateway-resources`. |
 | `gateway/wireguard` | cilium gateway driver and non-NodePort load-balancer mode | A dedicated Gateway sharing the shared gateway's external IP (Cilium `lbipam.cilium.io/sharing-key`) for SideroLink WireGuard, instead of a dedicated Service. |
 
@@ -244,14 +252,3 @@ provisioning:
     initial_admins:
       - admin@example.com
 ```
-
-## Not covered yet
-
-- **PXE.** The image factory exposes a separate PXE frontend (`ingress.pxe` /
-  `gatewayApi.pxe`). Wiring it needs a second host and a network decision.
-- **SecureBoot.** Needs a signing key, a certificate, and a PCR key or KMS backend —
-  key-custody decisions this add-on doesn't make.
-- **Air-gapped.** Running without `ghcr.io` means seeding base images and cosign material
-  into an internal registry first. Harbor's problem, not this add-on's.
-- **Downstream cluster lifecycle ownership.** How Omni and Cluster API coexist for
-  provisioning clusters isn't decided yet.

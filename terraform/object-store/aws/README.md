@@ -1,5 +1,5 @@
 ---
-title: object-store/aws
+title: AWS
 description: Creates S3 buckets with encryption, public access blocked, and Windsor tags.
 ---
 
