@@ -16,25 +16,25 @@ Harbor, and Cluster API.
 ## Infrastructure
 
 ### Keys — Image Factory's cache
-- [signing](terraform/keys/signing)
+- [signing](../terraform/keys/signing)
 
 ### Object store — S3 buckets for Image Factory & Harbor
-- [aws](terraform/object-store/aws)
-- [hetzner](terraform/object-store/hetzner)
+- [aws](../terraform/object-store/aws)
+- [hetzner](../terraform/object-store/hetzner)
 
 ### Provisioning — Omni's identity and backups
-- [omni](terraform/provisioning/omni)
+- [omni](../terraform/provisioning/omni)
 
 ## Cluster
 
 ### Observability — Dashboards & alerts
-- [observability](kustomize/observability)
+- [observability](../kustomize/observability)
 
 ### Provisioning — Fleet provisioning
-- [provisioning](kustomize/provisioning)
+- [provisioning](../kustomize/provisioning)
 
 ### Registry — Container registry
-- [registry](kustomize/registry)
+- [registry](../kustomize/registry)
 
 <!-- END_STACK_INDEX -->
 
