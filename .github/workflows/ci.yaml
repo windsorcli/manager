@@ -78,10 +78,41 @@ jobs:
       - name: Setup tools
         uses: windsorcli/core/.github/actions/setup-tools@main
         with:
-          tools: terraform
+          tools: terraform,task,yq
 
       - name: Run terraform fmt
         run: terraform fmt -check -recursive
+
+      # Fail if kustomize/<add-on>/README.md has drifted from its .docs.yaml
+      # descriptor. Skipped on renovate PRs, matching core's convention — a
+      # dependency bump shouldn't be blocked by unrelated doc drift.
+      - name: Validate kustomize add-on docs
+        if: ${{ github.event_name == 'pull_request' && !startsWith(github.head_ref, 'renovate/') }}
+        run: task docs:kustomize:check
+
+      # Fail if any terraform/<module>/README.md has drifted from terraform-docs'
+      # output. Full-tree, not scoped to changed modules — core scopes this to
+      # avoid blocking unrelated PRs on drift in modules it didn't touch, but
+      # manager has 4 modules total, not core's several dozen, so the simpler
+      # full check is proportionate here.
+      - name: Validate terraform module docs
+        if: ${{ github.event_name == 'pull_request' && !startsWith(github.head_ref, 'renovate/') }}
+        run: task docs:terraform:check
+
+      # Fail if docs/index.md's Stack section has drifted from the terraform/
+      # and kustomize/ trees — a layer added without stack_backing frontmatter,
+      # or a category README that vanished.
+      - name: Validate stack index
+        if: ${{ github.event_name == 'pull_request' && !startsWith(github.head_ref, 'renovate/') }}
+        run: task docs:stack:check
+
+      # Fail if any doc has drifted into future-work framing (a "not covered
+      # yet" heading, roadmap/TODO phrasing about the doc's own subject).
+      # Docs describe the current state; ADRs and roadmap files are excluded
+      # since discussing deferred work is their actual job.
+      - name: Validate no future-work framing in docs
+        if: ${{ github.event_name == 'pull_request' && !startsWith(github.head_ref, 'renovate/') }}
+        run: task docs:no-future-work
 
       - name: Checkov GitHub Action
         uses: bridgecrewio/checkov-action@a8664e3a0549367977f0cda990a34311835c87c0 # v12.3123.0
