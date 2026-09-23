@@ -1,9 +1,7 @@
 ---
-title: keys/signing
+title: Signing
 description: Generates an ECDSA signing key held in Terraform state.
 ---
-
-# keys/signing
 
 Generates an ECDSA P-256 private key and keeps it in state, so every apply returns the
 same key. The image factory signs cached boot assets with it and nodes verify downloads
