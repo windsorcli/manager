@@ -1,0 +1,31 @@
+# Descriptor consumed by scripts/kustomize-docs.sh to populate the
+# BEGIN_KUSTOMIZE_DOCS / END_KUSTOMIZE_DOCS region of README.md.
+# Edit this file (not the README tables) when substitutions, components,
+# or dependencies change.
+
+components:
+  grafana-dashboards:
+    heading_only: true
+    description: "Grafana dashboards for the services Manager adds, loaded by Core's grafana sidecar into the `Provisioning` folder. Built from each service's own native metrics — no upstream dashboard exists for either."
+    variants:
+      image-factory:
+        enable_when: "`provisioning.image_factory.enabled: true` AND `telemetry.metrics.enabled: true`"
+        description: "ConfigMap `grafana-dashboard-image-factory` in `system-observability`, panelling `image_factory_assets_built_total`, `image_factory_assets_build_latency_seconds`, `image_factory_schematic_cache_*`, and `http_request_duration_seconds` — the same metrics `prometheus-alerts/image-factory` alerts on."
+      omni:
+        enable_when: "`provisioning.enabled: true` AND `telemetry.metrics.enabled: true`"
+        description: "ConfigMap `grafana-dashboard-omni` in `system-observability`, panelling `omni_machines`, `omni_connected_machines`, `omni_clusters`, `omni_machines_version`, `omni_siderolink_last_handshake_seconds`, and `http_requests_total`. Works from what `telemetry.metrics.enabled` alone scrapes — does not depend on the optional `omni/exporter` component."
+  prometheus-alerts:
+    heading_only: true
+    description: "Supplemental PrometheusRule alerts for the services Manager adds, each with a `promtool`-testable `prometheus-rule.test.yaml`."
+    variants:
+      image-factory:
+        enable_when: "`provisioning.image_factory.enabled: true` AND `telemetry.metrics.enabled: true`"
+        description: "PrometheusRule `image-factory-alerts` in `provisioning`. Covers factory absence and an elevated 5xx rate against the `image-factory-metrics` job Core's `image-factory/prometheus` component exposes."
+      omni:
+        enable_when: "`provisioning.enabled: true` AND `telemetry.metrics.enabled: true`"
+        description: "PrometheusRule `omni-alerts` in `provisioning`. Covers Omni's own supplemental alert conditions against the `omni-metrics` job Core's `omni/prometheus` component exposes."
+
+dependencies:
+  telemetry-install:
+    required_when: "always"
+    reason: "Both dashboards and alerts scrape or query metrics Prometheus and Grafana provide; Core's telemetry install must be reconciling first."

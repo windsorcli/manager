@@ -3,8 +3,6 @@ title: "ADR-0003: Secrets and PKI — the fleet's store, root, and who authentic
 description: "Core is proposing, not building, the two pieces this depends on: a secrets-store addon (OpenBao, core#2285) and a runtime secret-sync controller (External Secrets Operator, core#2284) — both open issues, neither with a facet yet. Core's own scoping already draws half the boundary: OpenBao's PKI engine is explicitly out of that issue, and per-fleet policy and roles are explicitly named as Manager's to build. This ADR draws the rest, the same way ADR-0002 drew identity's: Core owns the store and the controller because a single cluster wants runtime secrets too, and Manager owns everything fleet-only — the PKI engine that makes the management cluster a certificate authority for its downstream clusters, the per-cluster intermediates it issues, the auth method that lets a downstream cluster's ESO reach across cluster boundaries to read from it, and the bootstrap secret (OpenBao's unseal key) that has to exist before ESO does. That last piece reuses a mechanism this repo already has — a Terraform-generated key held in state and placed by a facet's own `secrets:` block, the same shape as the image factory's signing key — rather than inventing a new one. Nothing here is buildable yet; both Core issues are open and unbuilt, so this stands as the boundary record, same as ADR-0002 did before Core's identity work landed."
 ---
 
-# ADR-0003: Secrets and PKI — the fleet's store, root, and who authenticates to what
-
 ## Status
 
 Proposed (2026-07-31). Depends on [ADR-0001](0001-layering-on-core.md). Referenced by
