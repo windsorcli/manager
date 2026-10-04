@@ -31,7 +31,7 @@ spec:
       containers:
         - name: omni-exporter
           # renovate: datasource=docker depName=omni_exporter package=ghcr.io/siderolabs/omni_exporter
-          image: ghcr.io/siderolabs/omni_exporter:v0.1.0@sha256:584ea21f2078673e0aa3a552491718affe6f75a84fbbe5651f5649d21056563c
+          image: ghcr.io/siderolabs/omni_exporter:v0.2.0@sha256:cb56cc8afdc52c744672640f4a5644c1a9dcb83664dfe72246f67170e98ecde9
           env:
             # In-cluster, plain h2c (no TLS) — the chart's own "omni" Service, not the
             # external gateway hostname. Routing a server-side caller through the
