@@ -1,65 +1,58 @@
 ---
 title: Provisioning
 description: Downstream cluster provisioning — self-hosted Talos image factory and Sidero Omni, turned on together by provisioning.enabled.
+stack_backing: Fleet provisioning
 ---
 
-# Provisioning
-
-Everything a fleet needs to provision and manage downstream Talos clusters: the
-**image factory** that builds the boot assets those clusters install from, and **Omni**,
-the control plane that provisions and manages the clusters themselves. Both are declared
-in one facet, `addon-provisioning.yaml`, but each is its own Flux Kustomization and
-independently toggleable — the `provisioning.enabled` flag is what turns them on together
-as one fleet capability, fanning on `identity` and `provisioning.image_factory` as Omni's
-dependencies. `provisioning.image_factory.enabled` alone still works without Omni or
-`provisioning.enabled`, for a single cluster that only wants air-gapped, version-pinned
-Talos assets.
+Provisions and manages downstream Talos clusters: the **image factory** builds boot
+assets, and **Omni** is the control plane that provisions and manages the clusters.
+Both are declared in `addon-provisioning.yaml`, each its own Flux Kustomization,
+independently toggleable. `provisioning.image_factory.enabled` works alone, without Omni,
+for a single cluster that just wants air-gapped Talos assets.
 
 ## Image Factory
 
-Generates Talos boot assets — installers, ISOs, PXE artifacts — from schematics, the same
-service that runs at [factory.talos.dev](https://factory.talos.dev), hosted in the
-management cluster. A fleet needs this to pin what its machines boot and to build images
-with system extensions without reaching the public factory.
+Generates Talos boot assets (installers, ISOs, PXE artifacts) from schematics — the same
+service as [factory.talos.dev](https://factory.talos.dev), hosted in the management
+cluster. Pins what machines boot and builds images with system extensions, without
+reaching the public factory.
 
-Installs the Sidero Labs `image-factory` chart from `oci://ghcr.io/siderolabs/charts`. It
-has two hard external dependencies that are not optional and not defaulted:
+Installs the Sidero Labs `image-factory` chart from `oci://ghcr.io/siderolabs/charts`. Hard
+dependencies:
 
-- **A schematic registry.** Generated schematics are pushed to an OCI registry, so the
-  factory needs one it can write to. Once Manager's Harbor lands this points at it; until
-  then it is whatever registry the operator supplies. The chart's `registry.example.com`
-  is a placeholder that fails at runtime, so the facet requires the value up front.
-- **A cache signing key.** Cached assets are signed so nodes can verify what they receive.
-  The `keys/signing` Terraform module generates an ECDSA P-256 key and holds it in state;
-  set `cache_signing_key` to supply your own instead, and the module is skipped. Windsor
-  materializes whichever it gets into the `image-factory-cache-signing-key` Secret, where
-  the chart reads the data key `cache-signing.key`.
-
-  Rotating the key invalidates every asset already signed with the old one.
+- **A schematic registry.** The in-cluster `registry` component backs this by default
+  (`registry.provisioning.svc.cluster.local:5000`, plain HTTP, no route). Name an external
+  registry under `provisioning.image_factory.registry.schematic.registry` and the in-cluster
+  one is left out entirely; the chart's own `registry.example.com` default is never used.
+- **A cache signing key.** Signs cached assets so nodes can verify them. `keys/signing`
+  generates one (ECDSA P-256) by default; set `cache_signing_key` to supply your own.
+  Rotating the key invalidates assets already signed with the old one.
 
 ### Architecture
 
 ```mermaid
 flowchart LR
+  base[provisioning-base<br/>Namespace + siderolabs HelmRepository]
   flux[Flux helm-controller]
 
   subgraph systemfactory[image-factory]
     hr[HelmRelease image-factory]
-    pod[Image Factory Deployment<br/>UI · API · PXE · registry]
+    pod[Image Factory Deployment<br/>UI · API · registry frontends]
     secret[Secret<br/>cache-signing.key]
   end
 
-  schematic[(Schematic registry<br/>OCI, push access)]
-  cache[(Asset cache<br/>OCI registry or S3)]
+  reg[(registry<br/>in-cluster OCI · PVC or object-store)]
+  extreg[(External registry<br/>opt-in override)]
   upstream[(ghcr.io/siderolabs<br/>imager · installer · extensions)]
   gw[Core gateway<br/>external · Gateway API]
   machines[Talos machines]
 
+  base -.dependsOn.-> systemfactory
   flux ==> hr
   hr --> pod
   secret -.mounted.-> pod
-  pod -->|push/pull schematics| schematic
-  pod -->|cache built assets| cache
+  pod -->|schematics · asset cache · installers| reg
+  pod -.optional override.-> extreg
   pod -->|pull base images| upstream
   gw -->|route| pod
   machines -->|download installers| gw
@@ -67,65 +60,58 @@ flowchart LR
 
 ### Routing
 
-The factory is reachable at `factory.<domain>` through Core's canonical `external` Gateway.
-The add-on ships one HTTPRoute attached to both the `web-http` and `web-https` listeners,
-which covers the envoy and cilium drivers alike — both implement Gateway API, and Core emits
-the same Gateway either way. The route lives in the resources tier and waits on
-`gateway-resources`, so the listeners exist before it attaches.
+Reachable at `factory.<domain>` through Core's canonical `external` Gateway. One HTTPRoute
+covers both envoy and cilium drivers, since both implement Gateway API. It waits on
+`gateway-resources` so the listeners exist first.
 
 ### Scaling
 
-Builds are CPU-bound and each one runs the imager. Three levers, in the order worth
-reaching for them:
+Builds are CPU-bound. Three levers, in order:
 
-1. **Cache.** Assets are cached in the registry, so one is built once and served
-   thereafter. On `hetzner` and `aws` that registry is bucket-backed and the cache
-   survives the pod; elsewhere it lands on a PVC. Running with no working cache is what
-   makes a factory feel slow.
+1. **Cache.** Built once, served after. Bucket-backed on `hetzner`/`aws` (survives the
+   pod); a PVC elsewhere. No cache makes builds feel slow.
 2. **Concurrency.** `max_concurrency` (default 6) caps simultaneous builds. Raising it
-   without node capacity converts one slow build into six slow builds.
-3. **Replicas.** `topology: ha` runs two replicas with anti-affinity. The chart pins the
-   Recreate strategy, so this buys redundancy against node loss, not zero-downtime
-   rollouts. Replicas are safe because nothing is held locally — schematics are in the
-   registry, assets in the cache.
+   without node capacity just slows every build.
+3. **Replicas.** `topology: ha` runs two, with anti-affinity. Redundancy against node
+   loss, not zero-downtime (the chart uses Recreate). Safe because nothing is held
+   locally.
 
 ## Omni
 
-Sidero Labs' self-hosted fleet control plane for Talos — the system of record for every
-downstream cluster's identity, and the thing an operator actually drives to provision and
-manage them. See [ADR-0004](/docs/adr/0004-omni.md) for the deployment shape decisions:
-embedded etcd, own TLS, WireGuard-based SideroLink exposure, and SAML auth against Core's
-Keycloak realm rather than the OIDC path Omni's own group/role claim mapping doesn't support
-yet.
+Sidero Labs' self-hosted fleet control plane for Talos: the system of record for every
+downstream cluster's identity, and what an operator uses to provision and manage them.
+Runs with embedded etcd, its own TLS, WireGuard-based SideroLink exposure, and SAML auth
+against Core's Keycloak realm (Omni's OIDC path has no group/role claim mapping yet).
 
-Installs the Sidero Labs `omni` chart from `oci://ghcr.io/siderolabs/charts`. Hard external
+Installs the Sidero Labs `omni` chart from `oci://ghcr.io/siderolabs/charts`. Hard
 dependencies:
 
-- **An identity provider.** Omni authenticates operators via SAML, registered as a client
-  of Core's platform Keycloak realm by an admin-API Job (`omni/saml-client`) — Core's
-  `identity` add-on never enables the CRD-based client registration path.
-- **An etcd encryption key** outside dev mode, and **at least one bootstrap admin email** —
-  the chart refuses to start without either. See `provisioning.omni.etcd_encryption_key` and
+- **An identity provider.** SAML, registered by an admin-API Job (`omni/saml-client`)
+  against Core's platform Keycloak realm.
+- **An etcd encryption key** outside dev mode, and **at least one bootstrap admin email**.
+  The chart won't start without either — see `provisioning.omni.etcd_encryption_key` and
   `provisioning.omni.initial_admins`.
-- **A gateway.** Omni's UI/API, Kubernetes proxy, and SideroLink machine API are all
-  reached through Core's canonical `external` Gateway.
+- **A gateway.** Omni's UI/API, Kubernetes proxy, and SideroLink machine API all reach
+  Core's canonical `external` Gateway.
+- **A SideroLink advertised endpoint,** on a cloud load-balancer platform (AWS, Hetzner,
+  Azure), whenever Windsor can't derive one on its own. This needs two applies: bootstrap
+  once to get a load-balancer IP, set `provisioning.omni.wireguard.advertised_endpoint` to
+  `<that IP>:30180`, then apply again.
 
 ### Routing
 
-Three HTTPRoutes on the shared gateway — API/UI, Kubernetes proxy, and SideroLink machine
-API — plus SideroLink's own WireGuard exposure, which varies by load-balancer mode: a
-dedicated NodePort or LoadBalancer Service everywhere the gateway driver is envoy or the
-cluster runs in NodePort mode, or a second Gateway sharing the shared one's external IP
-(`omni/gateway/wireguard`) when the driver is cilium — see
-[ADR-0005](/docs/adr/0005-siderolink-gateway-exposure.md) for why envoy doesn't get that
-same dedicated-Gateway path yet.
+Three HTTPRoutes on the shared gateway: API/UI, Kubernetes proxy, and SideroLink machine
+API. SideroLink's own WireGuard exposure varies by load-balancer mode: a dedicated
+NodePort or LoadBalancer Service on envoy or NodePort clusters, or a second Gateway
+sharing the shared one's external IP (`omni/gateway/wireguard`) on cilium. Envoy doesn't
+get the dedicated-Gateway path yet.
 
 ### Image factory integration
 
-Omni's `config.registries.imageFactoryBaseURL` points at Manager's own image factory when
-`provisioning.image_factory.enabled == true`, falling back to the public `https://factory.talos.dev`
-otherwise — both Omni's own reconciliation and the download links it hands back to an
-operator's browser use this same URL.
+Omni's `config.registries.imageFactoryBaseURL` takes `provisioning.image_factory.external_url`
+when set, otherwise Manager's own image factory when `provisioning.image_factory.enabled == true`,
+otherwise the public `https://factory.talos.dev`. Used both for Omni's own reconciliation and
+the download links it hands an operator's browser.
 
 ## Configuration
 
@@ -154,32 +140,55 @@ operator's browser use this same URL.
 
 ## Components — `shared`
 
-| Component | Enable when | Effect |
-|---|---|---|
-| `namespace` | always | The `provisioning` Namespace and the shared `siderolabs` HelmRepository. |
+### `namespace`
+
+_Enabled when always._
+
+The `provisioning` Namespace and the shared `siderolabs` HelmRepository.
 
 ## Components — `image-factory`
 
-| Component | Enable when | Effect |
+### `registry`
+
+_Enabled when no external schematic registry is named._
+
+In-cluster OCI registry (`distribution`) holding schematics and cached boot assets. Reached at `registry.provisioning.svc.cluster.local:5000` over plain HTTP; no route, and a NetworkPolicy admits only the factory pod on 5000.
+
+| Variant | Enabled when | Effect |
 |---|---|---|
-| `image-factory` | `provisioning.image_factory.enabled == true` | Helm release of the Sidero Labs `image-factory` chart in `provisioning`, from `oci://ghcr.io/siderolabs/charts`. Serves the UI, API, and registry frontends on :8080. Runs as uid 1000, non-root, baseline PSA-compatible. The chart supports only the Recreate deployment strategy. |
-| `image-factory/ha` | `topology == 'ha'` | Two replicas with pod anti-affinity across nodes. Redundancy against node loss only — the Recreate strategy means rollouts still have a gap. Safe because builds are stateless: schematics live in the registry, cached assets in the cache backend. |
-| `image-factory/prometheus` | `telemetry.metrics.enabled == true` | Metrics Service on :2122 plus a ServiceMonitor. Both are needed — the chart leaves the metrics Service off by default, so a ServiceMonitor alone would have nothing to scrape. |
-| `image-factory/gateway` | gateway is enabled | HTTPRoute on Core's canonical `external` Gateway, attached to both the web-http and web-https listeners. One route serves both gateway drivers, since envoy and cilium each implement Gateway API. Lives in the resources tier and depends on `gateway-resources`. |
-| `image-factory/harbor-auth` | the registry capability's driver is harbor | Mounts the dockerconfigjson Secret `harbor/image-factory` writes (kustomize/registry/) and points `DOCKER_CONFIG` at it, so the chart's own OCI client authenticates its pushes. |
+| `pvc` | `object_store.driver` is neither `hetzner` nor `aws` | Backs the registry with a volumeClaimTemplate on the default storage class, in place of its default emptyDir. Without it a restart loses every schematic id already handed out. |
+| `s3` | `object_store.driver` is `hetzner` or `aws` | Backs the registry with a bucket from the platform's object store instead of a volume. Limited to the platforms the registry holds credentials for: Hetzner keys come from `hetzner.object_storage`, and on AWS an empty key pair leaves the S3 driver on the instance credential chain. A minio object store stays on a PVC until credentials for one exist. |
+
+### `image-factory`
+
+_Enabled when `provisioning.image_factory.enabled == true`._
+
+Helm release of the Sidero Labs `image-factory` chart in `provisioning`, from `oci://ghcr.io/siderolabs/charts`. Serves the UI, API, and registry frontends on :8080. Runs as uid 1000, non-root, baseline PSA-compatible. The chart supports only the Recreate deployment strategy.
+
+| Variant | Enabled when | Effect |
+|---|---|---|
+| `ha` | `topology == 'ha'` | Two replicas with pod anti-affinity across nodes. Redundancy against node loss only — the Recreate strategy means rollouts still have a gap. Safe because builds are stateless: schematics live in the registry, cached assets in the cache backend. |
+| `prometheus` | `telemetry.metrics.enabled == true` | Metrics Service on :2122 plus a ServiceMonitor. Both are needed — the chart leaves the metrics Service off by default, so a ServiceMonitor alone would have nothing to scrape. |
+| `gateway` | always (`gateway.enabled ?? ingress.enabled ?? true`, so this defaults on) | HTTPRoute on Core's canonical `external` Gateway, attached to both the web-http and web-https listeners. One route serves both gateway drivers, since envoy and cilium each implement Gateway API. Lives in the resources tier and depends on `gateway-resources`. |
+| `harbor-auth` | the registry capability's driver is harbor | Mounts the dockerconfigjson Secret `harbor/image-factory` writes (kustomize/registry/) and points `DOCKER_CONFIG` at it, so the chart's own OCI client authenticates its pushes. |
 
 ## Components — `omni`
 
-| Component | Enable when | Effect |
+### `omni`
+
+_Enabled when `provisioning.enabled == true`._
+
+Helm release of the Sidero Labs `omni` chart in `provisioning`, from `oci://ghcr.io/siderolabs/charts`. The fleet's self-hosted Talos control plane — embedded etcd, own TLS, SideroLink, Keycloak SAML.
+
+| Variant | Enabled when | Effect |
 |---|---|---|
-| `omni` | `provisioning.enabled == true` | Helm release of the Sidero Labs `omni` chart in `provisioning`, from `oci://ghcr.io/siderolabs/charts`. The fleet's self-hosted Talos control plane — embedded etcd, own TLS, SideroLink, Keycloak SAML. |
-| `omni/saml-client` | always | Job that registers Omni as a SAML client of the platform Keycloak realm over the admin REST API. |
-| `omni/prometheus` | `telemetry.metrics.enabled == true` | Metrics Service and ServiceMonitor for Omni's native metrics. |
-| `omni/nodeport` | NodePort load-balancer mode (e.g. docker-desktop) | Dedicated NodePort Service for SideroLink WireGuard. |
-| `omni/loadbalancer` | load-balancer mode and the gateway driver isn't cilium | Dedicated LoadBalancer Service for SideroLink WireGuard. |
-| `omni/exporter` | metrics are enabled and `provisioning.omni.service_account_key` is set | omni_exporter Deployment. Off until an admin creates the Reader-role service account by hand and hands the key to Windsor via a secret() reference. |
-| `omni/gateway` | always | HTTPRoutes on Core's canonical `external` Gateway for Omni's UI/API, Kubernetes proxy, and SideroLink machine API. Lives in the resources tier and depends on `gateway-resources`. |
-| `omni/gateway/wireguard` | cilium gateway driver and non-NodePort load-balancer mode | A dedicated Gateway sharing the shared gateway's external IP (Cilium `lbipam.cilium.io/sharing-key`) for SideroLink WireGuard, instead of a dedicated Service. |
+| `saml-client` | always | Job that registers Omni as a SAML client of the platform Keycloak realm over the admin REST API. |
+| `prometheus` | `telemetry.metrics.enabled == true` | Metrics Service and ServiceMonitor for Omni's native metrics. |
+| `nodeport` | NodePort load-balancer mode (e.g. docker-desktop) | Dedicated NodePort Service for SideroLink WireGuard. |
+| `loadbalancer` | load-balancer mode and the gateway driver isn't cilium | Dedicated LoadBalancer Service for SideroLink WireGuard. |
+| `exporter` | metrics are enabled and `provisioning.omni.service_account_key` is set | omni_exporter Deployment, Service, and ServiceMonitor. Off until an admin creates the Reader-role service account by hand and hands the key to Windsor via a secret() reference. |
+| `gateway` | always | HTTPRoutes on Core's canonical `external` Gateway for Omni's UI/API, Kubernetes proxy, and SideroLink machine API. Lives in the resources tier and depends on `gateway-resources`. |
+| `gateway/wireguard` | cilium gateway driver and non-NodePort load-balancer mode | A dedicated Gateway sharing the shared gateway's external IP (Cilium `lbipam.cilium.io/sharing-key`) for SideroLink WireGuard, instead of a dedicated Service. |
 
 ## Dependencies
 
@@ -243,16 +252,3 @@ provisioning:
     initial_admins:
       - admin@example.com
 ```
-
-## Not covered yet
-
-- **PXE.** The image factory chart exposes a separate PXE frontend with its own hostname
-  (`ingress.pxe` / `gatewayApi.pxe`). Wiring it needs a second host and a decision about
-  whether PXE is reachable from the provisioning network rather than the gateway.
-- **SecureBoot.** Asset signing for SecureBoot needs a signing key, a certificate, and a
-  PCR key, or a KMS backend. That is its own set of decisions about key custody.
-- **Air-gapped.** Running without reaching `ghcr.io` means seeding base images and cosign
-  material into an internal registry first, which is Harbor's problem before it is this
-  add-on's.
-- **Downstream cluster lifecycle ownership.** How Omni and Cluster API coexist for actually
-  provisioning clusters is ADR-0006, not yet written.
