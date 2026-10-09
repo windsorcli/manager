@@ -18,7 +18,7 @@ packages:
   - name: siderolabs/omni/omnictl@v1.12.3
   - name: siderolabs/omni/omni@v1.12.4
   - name: kubernetes/kubectl@v1.37.1
-  - name: kubernetes-sigs/kustomize@kustomize/v5.8.2
+  - name: kubernetes-sigs/kustomize@kustomize/v5.8.3
   - name: go-task/task@v3.54.0
   - name: golang/go@go1.27.2
   - name: docker/cli@v27.4.1
