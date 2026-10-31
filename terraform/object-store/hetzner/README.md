@@ -1,9 +1,7 @@
 ---
-title: object-store/hetzner
+title: Hetzner
 description: Creates buckets in Hetzner Object Storage.
 ---
-
-# object-store/hetzner
 
 Creates buckets in Hetzner Object Storage, which speaks S3 and is driven here through the
 AWS provider aimed at a location endpoint.

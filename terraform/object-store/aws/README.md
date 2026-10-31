@@ -1,9 +1,7 @@
 ---
-title: object-store/aws
+title: AWS
 description: Creates S3 buckets with encryption, public access blocked, and Windsor tags.
 ---
-
-# object-store/aws
 
 Creates S3 buckets behind the same interface as the other object-store implementations, so
 a facet can switch platforms without changing inputs.
