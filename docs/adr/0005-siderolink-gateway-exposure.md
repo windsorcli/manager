@@ -3,8 +3,6 @@ title: "ADR-0005: SideroLink WireGuard exposure — a dedicated Gateway sharing 
 description: "ADR-0004 decision 5 gave SideroLink's WireGuard tunnel its own LoadBalancer-or-NodePort Service, separate from the shared gateway, because raw UDP doesn't fit an HTTPRoute. Gateway API's UDPRoute closes that gap — Core's own CoreDNS add-on already proves it, and Cilium added native UDPRoute support in 1.20 (the version pinned here). This ADR gives Omni's own dedicated Gateway object a UDP listener, sharing the shared gateway's external IP via Cilium's LB-IPAM sharing-key rather than touching the shared Gateway object directly — cilium driver only for now."
 ---
 
-# ADR-0005: SideroLink WireGuard exposure — a dedicated Gateway sharing the shared gateway's IP
-
 ## Status
 
 Accepted (2026-08-08), implemented for the `cilium` gateway driver. Supersedes

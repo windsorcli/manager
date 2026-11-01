@@ -82,8 +82,8 @@ components:
     enable_when: "`registry.driver` is `harbor` and `object_store.driver` is `hetzner` or `aws`"
     description: "Backs Harbor with a bucket from the platform's object store instead of a PVC. Own bucket, own destroy policy — not shared with the distribution driver's."
   harbor/oidc:
-    enable_when: "`registry.driver` is `harbor`, `identity.enabled == true`, and `registry.harbor.sso` is not explicitly false"
-    description: "Admin-API Job that registers Harbor's OIDC client in the platform realm and configures Harbor for OIDC auth, group-mapped to `platform-admins`. A named `oidc` resources variant of the `registry` flux system (`registry-resources-oidc`) so it depends on identity without gating Harbor's install or gateway route."
+    enable_when: "`registry.driver` is `harbor`, `identity.enabled == true`, `identity.driver` is `keycloak`, `gateway.enabled == true`, and `registry.harbor.sso` is not explicitly false"
+    description: "Admin-API Job that registers Harbor's OIDC client in the platform realm and configures Harbor for OIDC auth, group-mapped to `platform-admins`. Needs hosted Keycloak and a gateway, since the Job registers a redirect URI on Harbor's gateway route. A named `oidc` resources variant of the `registry` flux system (`registry-resources-oidc`) so it depends on identity without gating Harbor's install or gateway route."
   harbor/gateway:
     enable_when: "`registry.driver` is `harbor` and `gateway.enabled == true`"
     description: "HTTPRoute on Core's canonical `external` Gateway. Lives in the resources tier and depends on `gateway-resources`. Without a gateway, reach Harbor by port-forwarding the `harbor` Service in `registry`."
@@ -96,6 +96,9 @@ components:
   harbor/image-factory:
     enable_when: "`registry.driver` is `harbor` and `provisioning.image_factory.enabled == true`"
     description: "Admin-API Job that creates an `image-factory` Harbor project and a scoped push/pull robot account, then writes a dockerconfigjson Secret in `provisioning` for the factory's own pod to mount. Needs RBAC to write that Secret cross-namespace — the only admin-API Job here that talks to the Kubernetes API, not just Harbor's."
+  harbor/prometheus:
+    enable_when: "`registry.driver` is `harbor` and `telemetry.metrics.enabled == true`"
+    description: "Turns on the chart's own `metrics` block plus a ServiceMonitor (30s interval). The chart adds a `/metrics` port to each component's existing Service rather than a dedicated metrics Service; everything scrapes under one `job=harbor`."
   distribution:
     enable_when: "`registry.driver` is `distribution` (the default)"
     description: "Bare, anonymous `distribution/distribution` StatefulSet + Service in `registry`. No auth, no scanning, no UI — a `NetworkPolicy` restricts ingress to image-factory's own pods, in their own namespace. The cheap default for a single internal consumer."

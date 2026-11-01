@@ -69,59 +69,61 @@ components:
     facet: shared
     enable_when: "always"
     description: "The `provisioning` Namespace and the shared `siderolabs` HelmRepository."
+  registry:
+    facet: image-factory
+    enable_when: "no external schematic registry is named"
+    description: "In-cluster OCI registry (`distribution`) holding schematics and cached boot assets. Reached at `registry.provisioning.svc.cluster.local:5000` over plain HTTP; no route, and a NetworkPolicy admits only the factory pod on 5000."
+    variants:
+      pvc:
+        enable_when: "`object_store.driver` is neither `hetzner` nor `aws`"
+        description: "Backs the registry with a volumeClaimTemplate on the default storage class, in place of its default emptyDir. Without it a restart loses every schematic id already handed out."
+      s3:
+        enable_when: "`object_store.driver` is `hetzner` or `aws`"
+        description: "Backs the registry with a bucket from the platform's object store instead of a volume. Limited to the platforms the registry holds credentials for: Hetzner keys come from `hetzner.object_storage`, and on AWS an empty key pair leaves the S3 driver on the instance credential chain. A minio object store stays on a PVC until credentials for one exist."
   image-factory:
     facet: image-factory
     enable_when: "`provisioning.image_factory.enabled == true`"
     description: "Helm release of the Sidero Labs `image-factory` chart in `provisioning`, from `oci://ghcr.io/siderolabs/charts`. Serves the UI, API, and registry frontends on :8080. Runs as uid 1000, non-root, baseline PSA-compatible. The chart supports only the Recreate deployment strategy."
-  image-factory/ha:
-    facet: image-factory
-    enable_when: "`topology == 'ha'`"
-    description: "Two replicas with pod anti-affinity across nodes. Redundancy against node loss only — the Recreate strategy means rollouts still have a gap. Safe because builds are stateless: schematics live in the registry, cached assets in the cache backend."
-  image-factory/prometheus:
-    facet: image-factory
-    enable_when: "`telemetry.metrics.enabled == true`"
-    description: "Metrics Service on :2122 plus a ServiceMonitor. Both are needed — the chart leaves the metrics Service off by default, so a ServiceMonitor alone would have nothing to scrape."
-  image-factory/gateway:
-    facet: image-factory
-    enable_when: "gateway is enabled"
-    description: "HTTPRoute on Core's canonical `external` Gateway, attached to both the web-http and web-https listeners. One route serves both gateway drivers, since envoy and cilium each implement Gateway API. Lives in the resources tier and depends on `gateway-resources`."
-  image-factory/harbor-auth:
-    facet: image-factory
-    enable_when: "the registry capability's driver is harbor"
-    description: "Mounts the dockerconfigjson Secret `harbor/image-factory` writes (kustomize/registry/) and points `DOCKER_CONFIG` at it, so the chart's own OCI client authenticates its pushes."
+    variants:
+      ha:
+        enable_when: "`topology == 'ha'`"
+        description: "Two replicas with pod anti-affinity across nodes. Redundancy against node loss only — the Recreate strategy means rollouts still have a gap. Safe because builds are stateless: schematics live in the registry, cached assets in the cache backend."
+      prometheus:
+        enable_when: "`telemetry.metrics.enabled == true`"
+        description: "Metrics Service on :2122 plus a ServiceMonitor. Both are needed — the chart leaves the metrics Service off by default, so a ServiceMonitor alone would have nothing to scrape."
+      gateway:
+        enable_when: "always (`gateway.enabled ?? ingress.enabled ?? true`, so this defaults on)"
+        description: "HTTPRoute on Core's canonical `external` Gateway, attached to both the web-http and web-https listeners. One route serves both gateway drivers, since envoy and cilium each implement Gateway API. Lives in the resources tier and depends on `gateway-resources`."
+      harbor-auth:
+        enable_when: "the registry capability's driver is harbor"
+        description: "Mounts the dockerconfigjson Secret `harbor/image-factory` writes (kustomize/registry/) and points `DOCKER_CONFIG` at it, so the chart's own OCI client authenticates its pushes."
 
   omni:
     facet: omni
     enable_when: "`provisioning.enabled == true`"
     description: "Helm release of the Sidero Labs `omni` chart in `provisioning`, from `oci://ghcr.io/siderolabs/charts`. The fleet's self-hosted Talos control plane — embedded etcd, own TLS, SideroLink, Keycloak SAML."
-  omni/saml-client:
-    facet: omni
-    enable_when: "always"
-    description: "Job that registers Omni as a SAML client of the platform Keycloak realm over the admin REST API."
-  omni/prometheus:
-    facet: omni
-    enable_when: "`telemetry.metrics.enabled == true`"
-    description: "Metrics Service and ServiceMonitor for Omni's native metrics."
-  omni/nodeport:
-    facet: omni
-    enable_when: "NodePort load-balancer mode (e.g. docker-desktop)"
-    description: "Dedicated NodePort Service for SideroLink WireGuard."
-  omni/loadbalancer:
-    facet: omni
-    enable_when: "load-balancer mode and the gateway driver isn't cilium"
-    description: "Dedicated LoadBalancer Service for SideroLink WireGuard."
-  omni/exporter:
-    facet: omni
-    enable_when: "metrics are enabled and `provisioning.omni.service_account_key` is set"
-    description: "omni_exporter Deployment. Off until an admin creates the Reader-role service account by hand and hands the key to Windsor via a secret() reference."
-  omni/gateway:
-    facet: omni
-    enable_when: "always"
-    description: "HTTPRoutes on Core's canonical `external` Gateway for Omni's UI/API, Kubernetes proxy, and SideroLink machine API. Lives in the resources tier and depends on `gateway-resources`."
-  omni/gateway/wireguard:
-    facet: omni
-    enable_when: "cilium gateway driver and non-NodePort load-balancer mode"
-    description: "A dedicated Gateway sharing the shared gateway's external IP (Cilium `lbipam.cilium.io/sharing-key`) for SideroLink WireGuard, instead of a dedicated Service."
+    variants:
+      saml-client:
+        enable_when: "always"
+        description: "Job that registers Omni as a SAML client of the platform Keycloak realm over the admin REST API."
+      prometheus:
+        enable_when: "`telemetry.metrics.enabled == true`"
+        description: "Metrics Service and ServiceMonitor for Omni's native metrics."
+      nodeport:
+        enable_when: "NodePort load-balancer mode (e.g. docker-desktop)"
+        description: "Dedicated NodePort Service for SideroLink WireGuard."
+      loadbalancer:
+        enable_when: "load-balancer mode and the gateway driver isn't cilium"
+        description: "Dedicated LoadBalancer Service for SideroLink WireGuard."
+      exporter:
+        enable_when: "metrics are enabled and `provisioning.omni.service_account_key` is set"
+        description: "omni_exporter Deployment, Service, and ServiceMonitor. Off until an admin creates the Reader-role service account by hand and hands the key to Windsor via a secret() reference."
+      gateway:
+        enable_when: "always"
+        description: "HTTPRoutes on Core's canonical `external` Gateway for Omni's UI/API, Kubernetes proxy, and SideroLink machine API. Lives in the resources tier and depends on `gateway-resources`."
+      gateway/wireguard:
+        enable_when: "cilium gateway driver and non-NodePort load-balancer mode"
+        description: "A dedicated Gateway sharing the shared gateway's external IP (Cilium `lbipam.cilium.io/sharing-key`) for SideroLink WireGuard, instead of a dedicated Service."
 
 dependencies:
   provisioning-base:

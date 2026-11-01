@@ -3,8 +3,6 @@ title: "ADR-0001: What Manager authors and what it turns on in Core"
 description: "Manager references Core as a source, so both blueprints compose into one set of facets, components, and schema properties. This ADR draws the line: Manager authors only what a fleet needs, turns Core capabilities on through context values rather than redeclaring them, takes component names Core does not use, and adds only new schema keys. The composer sorts facets by source depth, so composing after Core needs nothing from Manager."
 ---
 
-# ADR-0001: What Manager authors and what it turns on in Core
-
 ## Status
 
 Proposed (2026-07-22). Amended 2026-07-24 after the composer gaps this ADR worked around
