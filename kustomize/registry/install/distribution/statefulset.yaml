@@ -24,7 +24,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: distribution
-          # renovate: datasource=docker depName=distribution package=ghcr.io/distribution/distribution
+          # artifact: type=image name=ghcr.io/distribution/distribution
           image: ghcr.io/distribution/distribution:3.0.0@sha256:4ba3adf47f5c866e9a29288c758c5328ef03396cb8f5f6454463655fa8bc83e2
           securityContext:
             allowPrivilegeEscalation: false

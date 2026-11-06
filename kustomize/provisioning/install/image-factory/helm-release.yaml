@@ -18,7 +18,7 @@ spec:
   chart:
     spec:
       chart: image-factory
-      # renovate: datasource=docker depName=image-factory-chart package=ghcr.io/siderolabs/charts/image-factory
+      # artifact: type=chart name=image-factory repo=oci://ghcr.io/siderolabs/charts
       version: 1.8.0
       sourceRef:
         kind: HelmRepository
@@ -29,7 +29,7 @@ spec:
     fullnameOverride: image-factory
     image:
       repository: ghcr.io/siderolabs/image-factory
-      # renovate: datasource=docker depName=image-factory package=ghcr.io/siderolabs/image-factory
+      # artifact: type=image name=ghcr.io/siderolabs/image-factory
       tag: v1.8.0@sha256:f281a1e56195c0fb5bac8e8fd584613f9693796324691d64ce6df1861593454c
     # The chart supports only the Recreate strategy.
     strategy:

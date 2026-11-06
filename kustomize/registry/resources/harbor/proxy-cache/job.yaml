@@ -37,7 +37,7 @@ spec:
             defaultMode: 0440
       containers:
         - name: configure-proxy-cache
-          # renovate: datasource=docker depName=kubectl package=alpine/k8s
+          # artifact: type=image name=docker.io/alpine/k8s
           image: alpine/k8s:1.37.2@sha256:dcb7185e112a453aa72f426754849a97357727ef8f40168fb208c8cf59952042
           volumeMounts:
             - name: work
