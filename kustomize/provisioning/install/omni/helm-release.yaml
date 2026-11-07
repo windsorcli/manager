@@ -21,7 +21,7 @@ spec:
     spec:
       chart: omni
       # artifact: type=chart name=omni repo=oci://ghcr.io/siderolabs/charts
-      version: 2.12.4
+      version: 2.13.1
       sourceRef:
         kind: HelmRepository
         name: siderolabs
