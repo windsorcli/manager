@@ -8,18 +8,17 @@ metadata:
 # full-featured).
 when: registry.enabled == true
 
-requires:
-  - when: (registry.driver ?? 'distribution') == 'harbor' && dev != true
-    paths:
-      - registry.harbor.admin_password
-    message: Harbor requires a local admin password outside dev mode. Set registry.harbor.admin_password via a secret() reference.
-
 # =============================================================================
-# Terraform — object-store buckets
+# Terraform — Harbor admin password, object-store buckets
 # =============================================================================
 # Harbor's bucket disables force_destroy: it holds pushed images, not a cache.
 # distribution's bucket keeps the module's own default (force_destroy on): rebuildable.
 terraform:
+
+  # Generated once and held in state when the operator supplies no password.
+  - name: harbor
+    path: registry/harbor
+    when: (registry.driver ?? 'distribution') == 'harbor' && dev != true && (registry.harbor.admin_password ?? '') == ''
 
   - name: harbor-object-store
     path: object-store/hetzner
@@ -105,7 +104,7 @@ config:
                 : dns.public_domain))}
       admin_password: >-
         ${(registry.harbor.admin_password ?? '') != '' ? registry.harbor.admin_password :
-        (dev == true ? 'harbor-dev-admin-password' : '')}
+        (dev == true ? 'harbor-dev-admin-password' : terraform_output('harbor', 'admin_password'))}
       # SSO is on when identity hosts Keycloak, unless explicitly turned off. The Job
       # only knows how to talk to Keycloak's admin API (identity.driver: oidc hosts
       # nothing to register against, and creates no identity-resources to depend on).
