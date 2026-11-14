@@ -541,12 +541,12 @@ cases:
         enabled: true
         driver: harbor
     terraformOutputs:
-      harbor-admin-password:
-        result: generated-password
+      harbor:
+        admin_password: generated-password
     expect:
       terraform:
-        - name: harbor-admin-password
-          path: secrets/password
+        - name: harbor
+          path: registry/harbor
       flux:
         - name: registry
           secrets:
@@ -554,7 +554,7 @@ cases:
               data:
                 HARBOR_ADMIN_PASSWORD: generated-password
 
-  - name: skips the password module when an admin password is supplied
+  - name: skips the harbor module when an admin password is supplied
     values:
       platform: metal
       network: *default-network
@@ -574,9 +574,9 @@ cases:
                 HARBOR_ADMIN_PASSWORD: supplied-by-operator
     exclude:
       terraform:
-        - name: harbor-admin-password
+        - name: harbor
 
-  - name: skips the password module in dev mode
+  - name: skips the harbor module in dev mode
     values:
       dev: true
       platform: metal
@@ -595,7 +595,7 @@ cases:
                 HARBOR_ADMIN_PASSWORD: harbor-dev-admin-password
     exclude:
       terraform:
-        - name: harbor-admin-password
+        - name: harbor
 
   # Explicit hostname override flows through the install-tier substitution.
   - name: honors an explicit hostname

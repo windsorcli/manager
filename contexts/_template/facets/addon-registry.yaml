@@ -16,8 +16,8 @@ when: registry.enabled == true
 terraform:
 
   # Generated once and held in state when the operator supplies no password.
-  - name: harbor-admin-password
-    path: secrets/password
+  - name: harbor
+    path: registry/harbor
     when: (registry.driver ?? 'distribution') == 'harbor' && dev != true && (registry.harbor.admin_password ?? '') == ''
 
   - name: harbor-object-store
@@ -93,7 +93,7 @@ config:
                 : dns.public_domain))}
       admin_password: >-
         ${(registry.harbor.admin_password ?? '') != '' ? registry.harbor.admin_password :
-        (dev == true ? 'harbor-dev-admin-password' : terraform_output('harbor-admin-password', 'result'))}
+        (dev == true ? 'harbor-dev-admin-password' : terraform_output('harbor', 'admin_password'))}
       # SSO is on when identity hosts Keycloak, unless explicitly turned off. The Job
       # only knows how to talk to Keycloak's admin API (identity.driver: oidc hosts
       # nothing to register against, and creates no identity-resources to depend on).

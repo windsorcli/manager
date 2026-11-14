@@ -1,6 +1,5 @@
-# The secrets/password module generates a random password and holds it in state, so
-# every apply returns the same value. Harbor's initial admin password comes from here
-# when the operator supplies none.
+# The registry/harbor module generates Harbor's initial admin password and holds it in
+# state, so every apply returns the same value.
 
 # =============================================================================
 # Provider Configuration
@@ -17,12 +16,12 @@ terraform {
 }
 
 # =============================================================================
-# Password
+# Admin Password
 # =============================================================================
 
 # The random_password is an alphanumeric password with at least one upper, lower, and digit.
-resource "random_password" "password" {
-  length      = var.length
+resource "random_password" "admin" {
+  length      = var.admin_password_length
   special     = false
   min_upper   = 1
   min_lower   = 1
