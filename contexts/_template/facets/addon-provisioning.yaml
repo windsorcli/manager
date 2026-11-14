@@ -9,33 +9,35 @@ metadata:
 # is the coarse OR-gate; every terraform/config/flux entry below carries its own precise
 # when: for which of the two it belongs to. Same shape as Core's telemetry facet, whose
 # top-level when: is metrics.enabled || logs.enabled with per-component ternaries beneath.
-when: provisioning.enabled == true || provisioning.image_factory.enabled == true || provisioning.omni.enabled == true
+when: >-
+  provisioning.enabled == true || provisioning.image_factory.enabled == true ||
+  provisioning.omni.enabled == true
 
 requires:
   # Omni only — image_factory has no requirements of its own beyond
   # config-object-store.yaml's shared object_store checks.
-  - when: (provisioning.enabled == true || provisioning.omni.enabled == true) && identity.enabled != false
+  - when: provisioning_effective.omni == true
     paths:
       - gateway.enabled
     message: Omni's UI/API, Kubernetes proxy, and SideroLink machine API are reached over HTTPS through the cluster gateway — enable the gateway.
-  - when: (provisioning.enabled == true || provisioning.omni.enabled == true) && identity.enabled != false && dev != true
+  - when: provisioning_effective.omni == true && dev != true
     paths:
       - provisioning.omni.etcd_encryption_key
     message: Omni needs a GPG-armored private key to decrypt its etcd master key. Generate one with `(export GNUPGHOME=$(mktemp -d); gpg --batch --passphrase '' --quick-gen-key x; gpg -a --export-secret-key > omni.asc; rm -rf $GNUPGHOME)` and set provisioning.omni.etcd_encryption_key via a secret() reference.
   - when: >-
-      (provisioning.enabled == true || provisioning.omni.enabled == true) && identity.enabled != false &&
-      dev != true && omni_wireguard.gateway_routed == true && omni_wireguard.gateway_ip == '' &&
+      provisioning_effective.omni == true && dev != true &&
+      omni_wireguard.gateway_routed == true && omni_wireguard.gateway_ip == '' &&
       (provisioning.omni.wireguard.advertised_endpoint ?? '') == ''
     message: >-
       On the cilium gateway driver, SideroLink shares the external gateway's address.
       Set gateway.external.ip, or set provisioning.omni.wireguard.advertised_endpoint.
   - when: >-
-      (provisioning.enabled == true || provisioning.omni.enabled == true) && identity.enabled != false &&
-      omni_wireguard.gateway_routed != true && (omni_effective.wireguard_advertised_endpoint ?? '') == ''
+      provisioning_effective.omni == true && omni_wireguard.gateway_routed != true &&
+      (omni_effective.wireguard_advertised_endpoint ?? '') == ''
     paths:
       - provisioning.omni.wireguard.advertised_endpoint
     message: SideroLink's gateway LoadBalancer IP isn't known ahead of a cloud-managed LB controller provisioning it (aws, hetzner, azure). Apply once, then set provisioning.omni.wireguard.advertised_endpoint to <load-balancer-ip>:30180 and apply again.
-  - when: (provisioning.enabled == true || provisioning.omni.enabled == true) && identity.enabled != false && dev != true
+  - when: provisioning_effective.omni == true && dev != true
     paths:
       - provisioning.omni.initial_admins
     message: Omni requires at least one bootstrap admin email in config.auth.initialUsers before it will start. Set provisioning.omni.initial_admins to a list of operator emails — real access should route through Keycloak SAML group membership once it's set up.
@@ -51,11 +53,15 @@ terraform:
 
   - name: image-factory-signing-key
     path: keys/signing
-    when: provisioning.image_factory.enabled == true && (provisioning.image_factory.cache_signing_key ?? '') == ''
+    when: >-
+      provisioning.image_factory.enabled == true &&
+      (provisioning.image_factory.cache_signing_key ?? '') == ''
 
   - name: omni-account
     path: provisioning/omni
-    when: (provisioning.enabled == true || provisioning.omni.enabled == true) && identity.enabled != false && (provisioning.omni.account_id ?? '') == ''
+    when: >-
+      (provisioning.enabled == true || provisioning.omni.enabled == true) && identity.enabled != false &&
+      (provisioning.omni.account_id ?? '') == ''
 
   - name: omni-backup-object-store
     path: object-store/hetzner
@@ -102,9 +108,34 @@ config:
   # The factory needs a registry to push to. Turn one on, unless the operator
   # already named an external registry this repo doesn't manage.
   - name: registry
-    when: provisioning.image_factory.enabled == true && (provisioning.image_factory.registry.schematic.registry ?? '') == ''
+    when: >-
+      provisioning.image_factory.enabled == true &&
+      (provisioning.image_factory.registry.schematic.registry ?? '') == ''
     value:
       enabled: true
+
+  # Predicates and image factory settings shared by the entries below.
+  - name: provisioning_effective
+    value:
+      # Omni runs under provisioning.enabled or provisioning.omni.enabled, unless
+      # identity is explicitly off.
+      omni: >-
+        ${(provisioning.enabled == true || provisioning.omni.enabled == true) &&
+        identity.enabled != false}
+      metrics: "${(telemetry.metrics.enabled ?? false) == true}"
+      harbor: "${(registry_effective.driver ?? '') == 'harbor'}"
+      # An explicit schematic registry wins; else the registry capability's own.
+      factory_registry: >-
+        ${provisioning.image_factory.registry.schematic.registry ?? registry_effective.hostname}
+      factory_registry_insecure: >-
+        ${(provisioning.image_factory.registry.schematic.registry ?? '') == ''
+          ? registry_effective.insecure
+          : (provisioning.image_factory.registry.schematic.insecure ?? false)}
+      # Explicit override wins; else the factory's own route. docker-desktop reaches
+      # the gateway on 8443 rather than 443.
+      factory_url: >-
+        ${provisioning.image_factory.external_url
+          ?? ('https://factory.' + omni_effective.domain + omni_effective.external_port_suffix)}
 
   # SideroLink WireGuard exposure. On the cilium driver outside NodePort mode, the
   # omni-wireguard Gateway takes the external gateway's address and LB-IPAM
@@ -168,7 +199,9 @@ config:
   # NodePort needs a matching hostport (same-port passthrough). An operator's own
   # hostports list still wins (raw values merge over facet-computed config last).
   - name: cluster
-    when: (provisioning.enabled == true || provisioning.omni.enabled == true) && identity.enabled != false && workstation.runtime == 'docker-desktop'
+    when: >-
+      (provisioning.enabled == true || provisioning.omni.enabled == true) && identity.enabled != false &&
+      workstation.runtime == 'docker-desktop'
     value:
       controlplanes:
         hostports: >-
@@ -217,7 +250,7 @@ flux:
 
   # Owns the shared Namespace/HelmRepository; image-factory-install and omni-install depend on it.
   - name: provisioning-base
-    when: provisioning.image_factory.enabled == true || ((provisioning.enabled == true || provisioning.omni.enabled == true) && identity.enabled != false)
+    when: provisioning.image_factory.enabled == true || provisioning_effective.omni == true
     path: provisioning
     install:
       components:
@@ -236,41 +269,40 @@ flux:
     secrets:
       image-factory-cache-signing-key:
         data:
-          cache-signing.key: ${provisioning.image_factory.cache_signing_key ?? terraform_output("image-factory-signing-key", "private_key_pem")}
+          cache-signing.key: >-
+            ${provisioning.image_factory.cache_signing_key
+              ?? terraform_output("image-factory-signing-key", "private_key_pem")}
     install:
       components:
         - image-factory
         - "${topology == 'ha' ? 'image-factory/ha' : ''}"
-        - "${(telemetry.metrics.enabled ?? false) == true ? 'image-factory/prometheus' : ''}"
-        - "${(registry_effective.driver ?? '') == 'harbor' ? 'image-factory/harbor-auth' : ''}"
+        - "${provisioning_effective.metrics == true ? 'image-factory/prometheus' : ''}"
+        - "${provisioning_effective.harbor == true ? 'image-factory/harbor-auth' : ''}"
       substitutions:
-        external_domain: "${(dns.public_domain ?? '') == '' ? (dns.private_domain ?? dns.domain ?? '') : dns.public_domain}"
-        # Explicit override wins; else derive from the domain the route publishes on.
-        # docker-desktop reaches the gateway on 8443 rather than 443.
-        factory_external_url: >-
-          ${provisioning.image_factory.external_url
-            ?? ('https://factory.' + ((dns.public_domain ?? '') == ''
-                  ? (dns.private_domain ?? dns.domain ?? '')
-                  : dns.public_domain)
-                + (workstation.runtime == 'docker-desktop' ? ':8443' : ''))}
+        external_domain: "${omni_effective.domain}"
+        factory_external_url: "${provisioning_effective.factory_url}"
         # An explicit override wins; else read the registry capability's own config.
         # Harbor requires a project (a namespace with at least one path segment); the
         # distribution driver has no such constraint, so only harbor gets a default here.
-        factory_schematic_registry: "${provisioning.image_factory.registry.schematic.registry ?? registry_effective.hostname}"
-        factory_schematic_namespace: "${provisioning.image_factory.registry.schematic.namespace ?? ((registry_effective.driver ?? '') == 'harbor' ? 'image-factory' : 'siderolabs/image-factory')}"
+        factory_schematic_registry: "${provisioning_effective.factory_registry}"
+        factory_schematic_namespace: >-
+          ${provisioning.image_factory.registry.schematic.namespace
+            ?? (provisioning_effective.harbor == true ? 'image-factory' : 'siderolabs/image-factory')}
         factory_schematic_repository: "${provisioning.image_factory.registry.schematic.repository ?? 'schematics'}"
-        factory_schematic_insecure: "${(provisioning.image_factory.registry.schematic.registry ?? '') == '' ? registry_effective.insecure : (provisioning.image_factory.registry.schematic.insecure ?? false)}"
+        factory_schematic_insecure: "${provisioning_effective.factory_registry_insecure}"
         factory_max_concurrency: "${provisioning.image_factory.max_concurrency ?? 6}"
         factory_min_talos_version: "${provisioning.image_factory.min_talos_version ?? '1.2.0'}"
-        factory_cache_registry: "${provisioning.image_factory.registry.schematic.registry ?? registry_effective.hostname}"
-        factory_cache_insecure: "${(provisioning.image_factory.registry.schematic.registry ?? '') == '' ? registry_effective.insecure : (provisioning.image_factory.registry.schematic.insecure ?? false)}"
+        factory_cache_registry: "${provisioning_effective.factory_registry}"
+        factory_cache_insecure: "${provisioning_effective.factory_registry_insecure}"
         # Same registry as schematic/cache above — the chart's own default
         # (ghcr.io/siderolabs) is the upstream project's namespace, which a
         # self-hosted factory has no push credentials for.
-        factory_installer_registry: "${provisioning.image_factory.registry.schematic.registry ?? registry_effective.hostname}"
-        factory_installer_namespace: "${provisioning.image_factory.registry.installer.namespace ?? ((registry_effective.driver ?? '') == 'harbor' ? 'image-factory' : '')}"
+        factory_installer_registry: "${provisioning_effective.factory_registry}"
+        factory_installer_namespace: >-
+          ${provisioning.image_factory.registry.installer.namespace
+            ?? (provisioning_effective.harbor == true ? 'image-factory' : '')}
         factory_installer_repository: "${provisioning.image_factory.registry.installer.repository ?? 'installer'}"
-        factory_installer_insecure: "${(provisioning.image_factory.registry.schematic.registry ?? '') == '' ? registry_effective.insecure : (provisioning.image_factory.registry.schematic.insecure ?? false)}"
+        factory_installer_insecure: "${provisioning_effective.factory_registry_insecure}"
       timeout: 10m
       interval: 5m
     resources:
@@ -283,7 +315,7 @@ flux:
         components:
           - image-factory/gateway
         substitutions:
-          external_domain: "${(dns.public_domain ?? '') == '' ? (dns.private_domain ?? dns.domain ?? '') : dns.public_domain}"
+          external_domain: "${omni_effective.domain}"
         timeout: 10m
         interval: 5m
 
@@ -307,7 +339,7 @@ flux:
   # yet. Only the saml-client Job actually calls the realm's admin API, so only its
   # own resources variant below waits on identity-resources.
   - name: omni
-    when: (provisioning.enabled == true || provisioning.omni.enabled == true) && identity.enabled != false
+    when: provisioning_effective.omni == true
     path: provisioning
     dependsOn:
       - provisioning-base-install
@@ -324,10 +356,12 @@ flux:
     install:
       components:
         - omni
-        - "${(telemetry.metrics.enabled ?? false) == true ? 'omni/prometheus' : ''}"
+        - "${provisioning_effective.metrics == true ? 'omni/prometheus' : ''}"
         - "${lb_effective.mode == 'nodeport' ? 'omni/nodeport' : ''}"
         - "${lb_effective.mode != 'nodeport' && gateway.driver != 'cilium' ? 'omni/loadbalancer' : ''}"
-        - "${(telemetry.metrics.enabled ?? false) == true && (provisioning.omni.service_account_key ?? '') != '' ? 'omni/exporter' : ''}"
+        - >-
+          ${provisioning_effective.metrics == true && (provisioning.omni.service_account_key ?? '') != '' ?
+          'omni/exporter' : ''}
       substitutions:
         omni_account_id: "${provisioning.omni.account_id ?? terraform_output('omni-account', 'id')}"
         omni_hostname: "${omni_effective.hostname}${omni_effective.external_port_suffix}"
@@ -341,7 +375,9 @@ flux:
         # operator's browser — so it has to be the external, browser-reachable
         # URL, not the in-cluster Service. Falls back to Manager's own image
         # factory when it's enabled, else the chart's public default.
-        omni_image_factory_url: "${provisioning.image_factory.external_url ?? (provisioning.image_factory.enabled == true ? ('https://factory.' + omni_effective.domain + omni_effective.external_port_suffix) : 'https://factory.talos.dev')}"
+        omni_image_factory_url: >-
+          ${provisioning.image_factory.enabled == true || (provisioning.image_factory.external_url ?? '') != ''
+            ? provisioning_effective.factory_url : 'https://factory.talos.dev'}
         # The chart refuses to start with zero initial users. dev mode seeds
         # Core's own dev admin (keycloak/realm/dev-user), so a SAML login with
         # that same identity is recognized immediately — not a separate,
@@ -385,7 +421,9 @@ flux:
           - omni/saml-client
         substitutions:
           keycloak_realm: "${identity_effective.realm}"
-          keycloak_admin_secret: "${(identity_effective.admin_password ?? '') != '' ? 'keycloak-bootstrap-admin' : 'keycloak-initial-admin'}"
+          keycloak_admin_secret: >-
+            ${(identity_effective.admin_password ?? '') != ''
+              ? 'keycloak-bootstrap-admin' : 'keycloak-initial-admin'}
           # crewjam/saml (Omni's SAML library) has no configured EntityID, so it
           # falls back to its own metadata URL as the issuer — not the bare root
           # URL — per samlsp.DefaultServiceProvider (samlsp/new.go): metadataURL :=
@@ -401,7 +439,7 @@ flux:
   # Kustomization rather than owning their own — see that facet's comment for why
   # (name collision risk with Core's own observability/telemetry).
   - name: manager-observability
-    when: provisioning.image_factory.enabled == true && (telemetry.metrics.enabled ?? false) == true
+    when: provisioning.image_factory.enabled == true && provisioning_effective.metrics == true
     resources:
       - components:
           - prometheus/alerts/image-factory
@@ -412,7 +450,7 @@ flux:
   # Neither needs omni/exporter: both work from Omni's native metrics alone, which
   # telemetry.metrics.enabled already scrapes.
   - name: manager-observability
-    when: (provisioning.enabled == true || provisioning.omni.enabled == true) && identity.enabled != false && (telemetry.metrics.enabled ?? false) == true
+    when: provisioning_effective.omni == true && provisioning_effective.metrics == true
     resources:
       - components:
           - prometheus/alerts/omni
