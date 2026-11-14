@@ -899,11 +899,10 @@ cases:
             substitutions:
               omni_wireguard_advertised_endpoint: "0.0.0.0:30180"
 
-  # Local/on-prem LoadBalancer platforms don't need dev mode or an operator override
-  # at all: the gateway's own address (network.loadbalancer_ips.start) is pinned via
-  # a static annotation (lbipam.cilium.io/ips or envoy's loadBalancerIP), known at
-  # blueprint-compose time — no "apply once, then set the real IP" dance. Routes
-  # through the shared gateway (omni/gateway/wireguard), not a dedicated Service.
+  # Local/on-prem LoadBalancer platforms need no dev mode or operator override: the
+  # external gateway's address is in configuration, so the endpoint is known at
+  # compose time. Without gateway.external.ip, the external gateway sits at the
+  # first network.loadbalancer_ips address.
   - name: derives the wireguard endpoint through the gateway on a local LoadBalancer
     values:
       platform: metal
@@ -1010,6 +1009,54 @@ cases:
               components:
                 - omni/gateway
                 - omni/gateway/wireguard
+
+  # Core pins the external gateway at gateway.external.ip, outside the pool, so
+  # SideroLink pins that address and shares it through the sharing-key.
+  - name: derives the wireguard endpoint from the external gateway ip on cilium
+    values:
+      platform: metal
+      network:
+        cidr_block: 10.5.0.0/16
+        loadbalancer_driver: cilium
+        loadbalancer_ips:
+          start: "10.5.1.10"
+          end: "10.5.1.100"
+      cluster:
+        <<: *default-cluster
+        cni:
+          driver: cilium
+      gateway:
+        enabled: true
+        driver: cilium
+        internal:
+          ip: 10.5.1.5
+        external:
+          ip: 10.5.1.6
+      dns:
+        private_domain: cluster.local
+      identity:
+        enabled: true
+      provisioning:
+        enabled: true
+        omni:
+          etcd_encryption_key: |
+            -----BEGIN PGP PRIVATE KEY BLOCK-----
+            dGVzdC1rZXktbWF0ZXJpYWw=
+            -----END PGP PRIVATE KEY BLOCK-----
+          initial_admins:
+            - admin@example.com
+    expect:
+      flux:
+        - name: omni
+          install:
+            substitutions:
+              omni_wireguard_advertised_endpoint: "10.5.1.6:30180"
+          resources:
+            - components:
+                - omni/gateway
+                - omni/gateway/wireguard
+              substitutions:
+                wireguard_gateway_ip: "10.5.1.6"
 
   # envoy driver keeps the chart's own dedicated LoadBalancer Service — gateway-routed
   # wireguard is cilium-only for now. The Service's own IP is unknowable ahead of an

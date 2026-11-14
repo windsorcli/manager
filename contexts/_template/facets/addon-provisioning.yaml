@@ -23,14 +23,15 @@ requires:
       - provisioning.omni.etcd_encryption_key
     message: Omni needs a GPG-armored private key to decrypt its etcd master key. Generate one with `(export GNUPGHOME=$(mktemp -d); gpg --batch --passphrase '' --quick-gen-key x; gpg -a --export-secret-key > omni.asc; rm -rf $GNUPGHOME)` and set provisioning.omni.etcd_encryption_key via a secret() reference.
   - when: >-
-      (provisioning.enabled == true || provisioning.omni.enabled == true) && identity.enabled != false && dev != true &&
-      lb_effective.mode != 'nodeport' && gateway.driver == 'cilium' && lb_effective.controller_required != true &&
-      (provisioning.omni.wireguard.advertised_endpoint ?? '') == '' && (network.loadbalancer_ips.start ?? '') == ''
-    message: On the cilium gateway driver, SideroLink advertises the first address in network.loadbalancer_ips. Set network.loadbalancer_ips, or set provisioning.omni.wireguard.advertised_endpoint.
+      (provisioning.enabled == true || provisioning.omni.enabled == true) && identity.enabled != false &&
+      dev != true && omni_wireguard.gateway_routed == true && omni_wireguard.gateway_ip == '' &&
+      (provisioning.omni.wireguard.advertised_endpoint ?? '') == ''
+    message: >-
+      On the cilium gateway driver, SideroLink shares the external gateway's address.
+      Set gateway.external.ip, or set provisioning.omni.wireguard.advertised_endpoint.
   - when: >-
       (provisioning.enabled == true || provisioning.omni.enabled == true) && identity.enabled != false &&
-      (omni_effective.wireguard_advertised_endpoint ?? '') == '' &&
-      !(lb_effective.mode != 'nodeport' && gateway.driver == 'cilium' && lb_effective.controller_required != true)
+      omni_wireguard.gateway_routed != true && (omni_effective.wireguard_advertised_endpoint ?? '') == ''
     paths:
       - provisioning.omni.wireguard.advertised_endpoint
     message: SideroLink's gateway LoadBalancer IP isn't known ahead of a cloud-managed LB controller provisioning it (aws, hetzner, azure). Apply once, then set provisioning.omni.wireguard.advertised_endpoint to <load-balancer-ip>:30180 and apply again.
@@ -105,6 +106,25 @@ config:
     value:
       enabled: true
 
+  # SideroLink WireGuard exposure. On the cilium driver outside NodePort mode, the
+  # omni-wireguard Gateway takes the external gateway's address and LB-IPAM
+  # sharing-key, so both Gateways answer on one IP. Without gateway.external.ip,
+  # the external gateway sits at the first network.loadbalancer_ips address.
+  - name: omni_wireguard
+    value:
+      port: "${provisioning.omni.wireguard.node_port ?? 30180}"
+      gateway_routed: >-
+        ${lb_effective.mode != 'nodeport' && gateway.driver == 'cilium' &&
+        lb_effective.controller_required != true}
+      gateway_ip: "${gateway.external.ip ?? network.loadbalancer_ips.start ?? ''}"
+      # First control-plane address. A remote device dials it, so 127.0.0.1 won't do.
+      node_ip: >-
+        ${len(terraform_output('compute', 'controlplanes') ?? []) > 0
+          ? split(terraform_output('compute', 'controlplanes')[0].endpoint, ':')[0]
+          : (len(values(cluster.controlplanes.nodes ?? {})) > 0
+              ? split(values(cluster.controlplanes.nodes)[0].endpoint, ':')[0]
+              : '')}
+
   # Bare hostnames (no port) for gateway HTTPRoute matching — sibling single-level
   # subdomains so they fit the gateway's own wildcard certificate SAN (*.<domain>),
   # the same constraint image-factory's own factory.<domain> route works within.
@@ -130,28 +150,19 @@ config:
       # docker-desktop reaches the gateway on 8443 rather than 443 — same port
       # image-factory's own external URL derivation appends.
       external_port_suffix: "${workstation.runtime == 'docker-desktop' ? ':8443' : ''}"
-      # NodePort environments (docker-desktop by default) and envoy driver keep the
-      # chart's own dedicated Service (omni/nodeport, omni/loadbalancer). cilium
-      # driver routes through a dedicated Gateway sharing the shared gateway's IP
-      # instead (omni/gateway/wireguard) — see docs/adr/0005 for why not envoy too.
-      wireguard_node_port: "${provisioning.omni.wireguard.node_port ?? 30180}"
-      # NodePort: derive from the control-plane node's own address (not 127.0.0.1 —
-      # a remote device dials this, docker-desktop's loopback trick doesn't apply).
-      # cilium: the shared gateway's IP is pinned (lbipam.cilium.io/ips), known
-      # without an apply. Everything else (envoy's own dedicated Service, cloud LB
-      # controllers) has no derivable default — dev mode gets a placeholder, others
-      # hit the requires: check below.
+      # NodePort mode and the envoy driver keep the chart's own Service
+      # (omni/nodeport, omni/loadbalancer); docs/adr/0005 explains why.
+      wireguard_node_port: "${omni_wireguard.port}"
+      # NodePort mode advertises the control-plane address and cilium the gateway
+      # address, both known before an apply. envoy's Service and cloud LB controllers
+      # assign an address only at apply time: dev mode gets a placeholder, and other
+      # contexts hit the requires: check above.
       wireguard_advertised_endpoint: >-
-        ${provisioning.omni.wireguard.advertised_endpoint
-          ?? (lb_effective.mode == 'nodeport'
-              ? (len(terraform_output('compute', 'controlplanes') ?? []) > 0
-                  ? (split(terraform_output('compute', 'controlplanes')[0].endpoint, ':')[0] + ':' + string(provisioning.omni.wireguard.node_port ?? 30180))
-                  : (len(values(cluster.controlplanes.nodes ?? {})) > 0
-                      ? (split(values(cluster.controlplanes.nodes)[0].endpoint, ':')[0] + ':' + string(provisioning.omni.wireguard.node_port ?? 30180))
-                      : (dev == true ? '0.0.0.0:' + string(provisioning.omni.wireguard.node_port ?? 30180) : '')))
-              : (gateway.driver == 'cilium' && lb_effective.controller_required != true && (network.loadbalancer_ips.start ?? '') != ''
-                  ? network.loadbalancer_ips.start + ':' + string(provisioning.omni.wireguard.node_port ?? 30180)
-                  : (dev == true ? '0.0.0.0:' + string(provisioning.omni.wireguard.node_port ?? 30180) : '')))}
+        ${provisioning.omni.wireguard.advertised_endpoint ?? (
+          let host = lb_effective.mode == 'nodeport' ? omni_wireguard.node_ip
+            : (omni_wireguard.gateway_routed == true ? omni_wireguard.gateway_ip : '');
+          host != '' ? host + ':' + string(omni_wireguard.port)
+            : (dev == true ? '0.0.0.0:' + string(omni_wireguard.port) : ''))}
 
   # docker-desktop only forwards explicitly published container ports, so the
   # NodePort needs a matching hostport (same-port passthrough). An operator's own
@@ -161,12 +172,12 @@ config:
     value:
       controlplanes:
         hostports: >-
-          ${["8080:30080/tcp", "8443:30443/tcp",
-             string(provisioning.omni.wireguard.node_port ?? 30180) + ":" + string(provisioning.omni.wireguard.node_port ?? 30180) + "/udp"]}
+          ${let port = string(provisioning.omni.wireguard.node_port ?? 30180);
+          ["8080:30080/tcp", "8443:30443/tcp", port + ":" + port + "/udp"]}
       workers:
         hostports: >-
-          ${["8080:30080/tcp", "8443:30443/tcp",
-             string(provisioning.omni.wireguard.node_port ?? 30180) + ":" + string(provisioning.omni.wireguard.node_port ?? 30180) + "/udp"]}
+          ${let port = string(provisioning.omni.wireguard.node_port ?? 30180);
+          ["8080:30080/tcp", "8443:30443/tcp", port + ":" + port + "/udp"]}
 
   # Split from the block above so the dev-only key can be a plain literal rather
   # than an expression string (the expression grammar has no escape for embedded
@@ -351,17 +362,15 @@ flux:
           - gateway-install
         components:
           - omni/gateway
-          # A dedicated Gateway sharing the shared one's external IP (Cilium's
-          # lbipam.cilium.io/sharing-key), not a listener added to the shared Gateway
-          # itself — that would need two Kustomizations both applying the same
-          # object under Flux's one global field-manager identity. envoy driver
-          # keeps the dedicated NodePort/LoadBalancer Service (omni/nodeport) for
-          # now; see docs/adr/0005.
+          # A dedicated Gateway on the external gateway's IP (Cilium's
+          # lbipam.cilium.io/sharing-key), not a listener added to core's Gateway:
+          # two Kustomizations applying one object fight under Flux's single
+          # field-manager identity. See docs/adr/0005.
           - "${gateway.driver == 'cilium' && lb_effective.mode != 'nodeport' ? 'omni/gateway/wireguard' : ''}"
         substitutions:
           external_domain: "${omni_effective.domain}"
-          loadbalancer_start_ip: "${network.loadbalancer_ips.start ?? ''}"
-          omni_wireguard_node_port: "${omni_effective.wireguard_node_port}"
+          wireguard_gateway_ip: "${omni_wireguard.gateway_ip}"
+          omni_wireguard_node_port: "${omni_wireguard.port}"
         timeout: 10m
         interval: 5m
 

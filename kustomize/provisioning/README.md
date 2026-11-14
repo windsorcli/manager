@@ -179,7 +179,7 @@ operator's browser use this same URL.
 | `omni/loadbalancer` | load-balancer mode and the gateway driver isn't cilium | Dedicated LoadBalancer Service for SideroLink WireGuard. |
 | `omni/exporter` | metrics are enabled and `provisioning.omni.service_account_key` is set | omni_exporter Deployment. Off until an admin creates the Reader-role service account by hand and hands the key to Windsor via a secret() reference. |
 | `omni/gateway` | always | HTTPRoutes on Core's canonical `external` Gateway for Omni's UI/API, Kubernetes proxy, and SideroLink machine API. Lives in the resources tier and depends on `gateway-resources`. |
-| `omni/gateway/wireguard` | cilium gateway driver and non-NodePort load-balancer mode | A dedicated Gateway sharing the shared gateway's external IP (Cilium `lbipam.cilium.io/sharing-key`) for SideroLink WireGuard, instead of a dedicated Service. |
+| `omni/gateway/wireguard` | cilium gateway driver and non-NodePort load-balancer mode | A dedicated Gateway on the external gateway's IP (`gateway.external.ip`, else the first `network.loadbalancer_ips` address) with Cilium's `lbipam.cilium.io/sharing-key`, for SideroLink WireGuard. |
 
 ## Dependencies
 
