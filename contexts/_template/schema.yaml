@@ -230,7 +230,7 @@ properties:
           admin_password:
             type: string
             sensitive: true
-            description: Initial password for Harbor's local admin account, used as a fallback sign-in when SSO isn't configured. Set via a secret() reference. Required outside dev mode; dev mode falls back to a fixed password stored in the facet.
+            description: Initial password for Harbor's local admin account, used as a fallback sign-in when SSO isn't configured. Set via a secret() reference. When unset, dev mode uses a fixed password stored in the facet, and other contexts generate one in Terraform state.
           registry_size:
             type: string
             default: 20Gi

@@ -1,5 +1,5 @@
 # addon-registry.yaml facet tests
-# Covers the enabled/disabled gate, the required admin password and gateway, the
+# Covers the enabled/disabled gate, the generated admin password, the gateway, the
 # database fan-on, storage landing on a PVC vs an object-store bucket, the terraform
 # bucket provisioning on hetzner/aws, the SSO wiring, the GC schedule, and the
 # metrics/log-filter observability contributions.
@@ -530,6 +530,73 @@ cases:
             components:
               - harbor
 
+  # Without an operator password outside dev, a generated one comes from Terraform state.
+  - name: generates the admin password when none is supplied
+    values:
+      platform: metal
+      network: *default-network
+      cluster: *default-cluster
+      gateway: *default-gateway
+      registry:
+        enabled: true
+        driver: harbor
+    terraformOutputs:
+      harbor-admin-password:
+        result: generated-password
+    expect:
+      terraform:
+        - name: harbor-admin-password
+          path: secrets/password
+      flux:
+        - name: registry
+          secrets:
+            harbor-admin-password:
+              data:
+                HARBOR_ADMIN_PASSWORD: generated-password
+
+  - name: skips the password module when an admin password is supplied
+    values:
+      platform: metal
+      network: *default-network
+      cluster: *default-cluster
+      gateway: *default-gateway
+      registry:
+        enabled: true
+        driver: harbor
+        harbor:
+          admin_password: supplied-by-operator
+    expect:
+      flux:
+        - name: registry
+          secrets:
+            harbor-admin-password:
+              data:
+                HARBOR_ADMIN_PASSWORD: supplied-by-operator
+    exclude:
+      terraform:
+        - name: harbor-admin-password
+
+  - name: skips the password module in dev mode
+    values:
+      dev: true
+      platform: metal
+      network: *default-network
+      cluster: *default-cluster
+      gateway: *default-gateway
+      registry:
+        enabled: true
+        driver: harbor
+    expect:
+      flux:
+        - name: registry
+          secrets:
+            harbor-admin-password:
+              data:
+                HARBOR_ADMIN_PASSWORD: harbor-dev-admin-password
+    exclude:
+      terraform:
+        - name: harbor-admin-password
+
   # Explicit hostname override flows through the install-tier substitution.
   - name: honors an explicit hostname
     values:
@@ -665,18 +732,6 @@ cases:
       database:
         postgres:
           enabled: false
-    expectError: true
-
-  # Missing the admin password fails composition outside dev mode.
-  - name: fails without an admin password
-    values:
-      platform: metal
-      network: *default-network
-      cluster: *default-cluster
-      gateway: *default-gateway
-      registry:
-        enabled: true
-        driver: harbor
     expectError: true
 
   # No gateway needed to install — Harbor still comes up (port-forward the harbor

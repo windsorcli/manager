@@ -18,4 +18,5 @@ Reference index for the Terraform modules in this blueprint. See
 | [object-store/aws](object-store/aws/) | Creates S3 buckets with encryption, public access blocked, and Windsor tags. |
 | [object-store/hetzner](object-store/hetzner/) | Creates buckets in Hetzner Object Storage. |
 | [provisioning/omni](provisioning/omni/) | Generates Omni's config.account.id and holds an inactive etcd backup S3 config. |
+| [secrets/password](secrets/password/) | Generates a random alphanumeric password held in Terraform state. |
 <!-- END_INDEX -->
