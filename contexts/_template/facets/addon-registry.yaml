@@ -191,8 +191,11 @@ flux:
       # port-forwarding the harbor Service in the registry namespace. distribution
       # never gets a route — it has no UI/API worth exposing.
       - when: (registry.driver ?? 'distribution') == 'harbor' && gateway.enabled == true
+        # gateway-install, not a gateway resources variant: core names each
+        # variant after the gateway it builds, and which gateways exist follows
+        # the domains. The route attaches once its Gateway is up.
         dependsOn:
-          - gateway-resources
+          - gateway-install
         components:
           - harbor/gateway
         substitutions:

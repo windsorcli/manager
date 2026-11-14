@@ -71,7 +71,7 @@ cases:
             interval: 5m
           resources:
             - dependsOn:
-                - gateway-resources
+                - gateway-install
               components:
                 - harbor/gateway
             - name: admin-jobs

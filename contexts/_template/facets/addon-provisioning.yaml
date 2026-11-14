@@ -22,7 +22,15 @@ requires:
     paths:
       - provisioning.omni.etcd_encryption_key
     message: Omni needs a GPG-armored private key to decrypt its etcd master key. Generate one with `(export GNUPGHOME=$(mktemp -d); gpg --batch --passphrase '' --quick-gen-key x; gpg -a --export-secret-key > omni.asc; rm -rf $GNUPGHOME)` and set provisioning.omni.etcd_encryption_key via a secret() reference.
-  - when: (provisioning.enabled == true || provisioning.omni.enabled == true) && identity.enabled != false && (omni_effective.wireguard_advertised_endpoint ?? '') == ''
+  - when: >-
+      (provisioning.enabled == true || provisioning.omni.enabled == true) && identity.enabled != false && dev != true &&
+      lb_effective.mode != 'nodeport' && gateway.driver == 'cilium' && lb_effective.controller_required != true &&
+      (provisioning.omni.wireguard.advertised_endpoint ?? '') == '' && (network.loadbalancer_ips.start ?? '') == ''
+    message: On the cilium gateway driver, SideroLink advertises the first address in network.loadbalancer_ips. Set network.loadbalancer_ips, or set provisioning.omni.wireguard.advertised_endpoint.
+  - when: >-
+      (provisioning.enabled == true || provisioning.omni.enabled == true) && identity.enabled != false &&
+      (omni_effective.wireguard_advertised_endpoint ?? '') == '' &&
+      !(lb_effective.mode != 'nodeport' && gateway.driver == 'cilium' && lb_effective.controller_required != true)
     paths:
       - provisioning.omni.wireguard.advertised_endpoint
     message: SideroLink's gateway LoadBalancer IP isn't known ahead of a cloud-managed LB controller provisioning it (aws, hetzner, azure). Apply once, then set provisioning.omni.wireguard.advertised_endpoint to <load-balancer-ip>:30180 and apply again.
@@ -141,7 +149,7 @@ config:
                   : (len(values(cluster.controlplanes.nodes ?? {})) > 0
                       ? (split(values(cluster.controlplanes.nodes)[0].endpoint, ':')[0] + ':' + string(provisioning.omni.wireguard.node_port ?? 30180))
                       : (dev == true ? '0.0.0.0:' + string(provisioning.omni.wireguard.node_port ?? 30180) : '')))
-              : (gateway.driver == 'cilium' && lb_effective.controller_required != true
+              : (gateway.driver == 'cilium' && lb_effective.controller_required != true && (network.loadbalancer_ips.start ?? '') != ''
                   ? network.loadbalancer_ips.start + ':' + string(provisioning.omni.wireguard.node_port ?? 30180)
                   : (dev == true ? '0.0.0.0:' + string(provisioning.omni.wireguard.node_port ?? 30180) : '')))}
 
@@ -256,8 +264,11 @@ flux:
       interval: 5m
     resources:
       - when: (gateway.enabled ?? ingress.enabled ?? true) == true
+        # gateway-install, not a gateway resources variant: core names each
+        # variant after the gateway it builds, and which gateways exist follows
+        # the domains. The route attaches once its Gateway is up.
         dependsOn:
-          - gateway-resources
+          - gateway-install
         components:
           - image-factory/gateway
         substitutions:
@@ -333,8 +344,11 @@ flux:
       timeout: 10m
       interval: 5m
     resources:
+      # gateway-install, not a gateway resources variant: core names each
+      # variant after the gateway it builds, and which gateways exist follows
+      # the domains. The routes attach once their Gateway is up.
       - dependsOn:
-          - gateway-resources
+          - gateway-install
         components:
           - omni/gateway
           # A dedicated Gateway sharing the shared one's external IP (Cilium's
@@ -346,7 +360,7 @@ flux:
           - "${gateway.driver == 'cilium' && lb_effective.mode != 'nodeport' ? 'omni/gateway/wireguard' : ''}"
         substitutions:
           external_domain: "${omni_effective.domain}"
-          loadbalancer_start_ip: "${network.loadbalancer_ips.start}"
+          loadbalancer_start_ip: "${network.loadbalancer_ips.start ?? ''}"
           omni_wireguard_node_port: "${omni_effective.wireguard_node_port}"
         timeout: 10m
         interval: 5m

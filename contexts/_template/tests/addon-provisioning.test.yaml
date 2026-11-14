@@ -91,7 +91,7 @@ cases:
             - components:
                 - image-factory/gateway
               dependsOn:
-                - gateway-resources
+                - gateway-install
 
   # Scale-out: replicas and metrics. The cache stays on the in-cluster registry until the
   # factory's bucket credentials are wired.
@@ -481,7 +481,7 @@ cases:
             interval: 5m
           resources:
             - dependsOn:
-                - gateway-resources
+                - gateway-install
               components:
                 - omni/gateway
               substitutions:
@@ -930,7 +930,83 @@ cases:
               omni_wireguard_advertised_endpoint: "10.5.1.10:30180"
           resources:
             - dependsOn:
-                - gateway-resources
+                - gateway-install
+              components:
+                - omni/gateway
+                - omni/gateway/wireguard
+
+  # The cilium driver advertises the first network.loadbalancer_ips address. An
+  # explicit advertised_endpoint wins, so a context with no pool still composes.
+  - name: honors the wireguard override on the cilium driver without a load balancer pool
+    values:
+      platform: metal
+      network:
+        cidr_block: 10.5.0.0/16
+        loadbalancer_driver: cilium
+      cluster:
+        <<: *default-cluster
+        cni:
+          driver: cilium
+      gateway:
+        enabled: true
+        driver: cilium
+        internal:
+          ip: 10.5.1.5
+      dns:
+        private_domain: cluster.local
+      identity:
+        enabled: true
+      provisioning:
+        enabled: true
+        omni: *default-omni
+    expect:
+      flux:
+        - name: omni
+          install:
+            substitutions:
+              omni_wireguard_advertised_endpoint: "203.0.113.10:50180"
+
+  # Core names each gateway resources variant after the gateway it builds, and a
+  # context with only dns.private_domain builds only the internal one. The routes
+  # wait on gateway-install, which exists for every gateway layout.
+  - name: routes the image factory and omni through gateway-install with only a private domain
+    values:
+      platform: metal
+      network:
+        cidr_block: 10.5.0.0/16
+        loadbalancer_driver: cilium
+        loadbalancer_ips:
+          start: "10.5.1.10"
+          end: "10.5.1.100"
+      cluster:
+        <<: *default-cluster
+        cni:
+          driver: cilium
+      gateway:
+        enabled: true
+        driver: cilium
+        internal:
+          ip: 10.5.1.5
+      dns:
+        private_domain: cluster.local
+      identity:
+        enabled: true
+      provisioning:
+        enabled: true
+        image_factory: *default-factory
+        omni: *default-omni
+    expect:
+      flux:
+        - name: image-factory
+          resources:
+            - dependsOn:
+                - gateway-install
+              components:
+                - image-factory/gateway
+        - name: omni
+          resources:
+            - dependsOn:
+                - gateway-install
               components:
                 - omni/gateway
                 - omni/gateway/wireguard
@@ -1004,7 +1080,7 @@ cases:
               omni_wireguard_advertised_endpoint: 10.5.0.10:30180
           resources:
             - dependsOn:
-                - gateway-resources
+                - gateway-install
               components:
                 - omni/gateway
       config:
