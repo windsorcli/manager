@@ -26,9 +26,12 @@ cilium -o jsonpath='{.status.supportedFeatures[*].name}'` lists `UDPRoute`;
 `kubeProxyReplacement: true` and `enable-l7-proxy: true` (both required) were already active.
 
 **The gateway's own address is statically known for local/on-prem platforms — the real
-payoff, not just consolidation.** Cilium's `lbipam.cilium.io/ips` annotation pins the shared
-gateway's Service to `network.loadbalancer_ips.start`, computed purely from
-`network.cidr_block` — no apply needed to discover it. Omni's own chart-managed
+payoff, not just consolidation.** Cilium's `lbipam.cilium.io/ips` annotation pins the external
+gateway's Service to `gateway.external.ip`. Without that value, the external gateway sits at
+`network.loadbalancer_ips.start`. Either way the address is in configuration, so no apply is
+needed to discover it. Core requires `gateway.external.ip` to sit outside
+`network.loadbalancer_ips`, so `omni-wireguard` MUST pin the same address the external gateway
+uses, not the first pool address. Omni's own chart-managed
 `LoadBalancer` Service, by contrast, gets an *arbitrary* IP from the same pool, which is what
 forced the two-phase "apply once, then set the real IP" bootstrap ADR-0004 decision 5
 accepted.
@@ -47,8 +50,8 @@ flowchart LR
     subgraph gw["system-gateway"]
         GE["Gateway external<br/>(Core-owned)"]
         GW["Gateway omni-wireguard<br/>listener wireguard-udp :30180/UDP<br/>(Manager-owned)"]
-        SVCE["auto-managed Service<br/>pinned to loadbalancer_ips.start"]
-        SVCW["auto-managed Service<br/>sharing-key: external → same IP"]
+        SVCE["auto-managed Service<br/>pinned to gateway.external.ip"]
+        SVCW["auto-managed Service<br/>same IP, sharing-key: external"]
     end
     subgraph omni["omni namespace"]
         UR["UDPRoute omni-wireguard"]
@@ -57,7 +60,7 @@ flowchart LR
     end
     GE --> SVCE
     GW --> SVCW
-    T -->|"advertisedEndpoint =<br/>loadbalancer_ips.start:30180"| SVCW -->|"backendRefs"| UR --> OSVC --> O
+    T -->|"advertisedEndpoint =<br/>gateway.external.ip:30180"| SVCW -->|"backendRefs"| UR --> OSVC --> O
 ```
 
 Two independent Kustomizations both applying the shared `Gateway/external` object was tried
@@ -123,6 +126,11 @@ object fight over `spec.listeners` ownership every reconcile. Confirmed via a re
 Windsor's composer merges `components:` lists across facets but not `Path`/`Source`; Manager's
 component path then resolves against Core's tree, where it doesn't exist. Confirmed via a
 real CI failure (`kustomize build failed: ... no such file or directory`).
+
+**Attach a `ListenerSet` to core's external Gateway.** Deferred. Cilium 1.20.3 supports
+`ListenerSet`, and a `UDPRoute` can target its listeners. Core's `allowed-listeners` component
+admits ListenerSets from labeled namespaces, which avoids the `spec.listeners` conflict above.
+Manager's pinned core has no `allowed-listeners` component, so this waits for that pin to move.
 
 **Route NodePort and envoy through the gateway too.** Deferred, not rejected outright — no
 Cilium-analog `sharing-key` mechanism was investigated for Envoy Gateway, and NodePort mode

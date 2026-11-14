@@ -91,7 +91,7 @@ cases:
             - components:
                 - image-factory/gateway
               dependsOn:
-                - gateway-resources
+                - gateway-install
 
   # Scale-out: replicas and metrics. The cache stays on the in-cluster registry until the
   # factory's bucket credentials are wired.
@@ -481,7 +481,7 @@ cases:
             interval: 5m
           resources:
             - dependsOn:
-                - gateway-resources
+                - gateway-install
               components:
                 - omni/gateway
               substitutions:
@@ -899,11 +899,10 @@ cases:
             substitutions:
               omni_wireguard_advertised_endpoint: "0.0.0.0:30180"
 
-  # Local/on-prem LoadBalancer platforms don't need dev mode or an operator override
-  # at all: the gateway's own address (network.loadbalancer_ips.start) is pinned via
-  # a static annotation (lbipam.cilium.io/ips or envoy's loadBalancerIP), known at
-  # blueprint-compose time — no "apply once, then set the real IP" dance. Routes
-  # through the shared gateway (omni/gateway/wireguard), not a dedicated Service.
+  # Local/on-prem LoadBalancer platforms need no dev mode or operator override: the
+  # external gateway's address is in configuration, so the endpoint is known at
+  # compose time. Without gateway.external.ip, the external gateway sits at the
+  # first network.loadbalancer_ips address.
   - name: derives the wireguard endpoint through the gateway on a local LoadBalancer
     values:
       platform: metal
@@ -930,10 +929,134 @@ cases:
               omni_wireguard_advertised_endpoint: "10.5.1.10:30180"
           resources:
             - dependsOn:
-                - gateway-resources
+                - gateway-install
               components:
                 - omni/gateway
                 - omni/gateway/wireguard
+
+  # The cilium driver advertises the first network.loadbalancer_ips address. An
+  # explicit advertised_endpoint wins, so a context with no pool still composes.
+  - name: honors the wireguard override on the cilium driver without a load balancer pool
+    values:
+      platform: metal
+      network:
+        cidr_block: 10.5.0.0/16
+        loadbalancer_driver: cilium
+      cluster:
+        <<: *default-cluster
+        cni:
+          driver: cilium
+      gateway:
+        enabled: true
+        driver: cilium
+        internal:
+          ip: 10.5.1.5
+      dns:
+        private_domain: cluster.local
+      identity:
+        enabled: true
+      provisioning:
+        enabled: true
+        omni: *default-omni
+    expect:
+      flux:
+        - name: omni
+          install:
+            substitutions:
+              omni_wireguard_advertised_endpoint: "203.0.113.10:50180"
+
+  # Core names each gateway resources variant after the gateway it builds, and a
+  # context with only dns.private_domain builds only the internal one. The routes
+  # wait on gateway-install, which exists for every gateway layout.
+  - name: routes the image factory and omni through gateway-install with only a private domain
+    values:
+      platform: metal
+      network:
+        cidr_block: 10.5.0.0/16
+        loadbalancer_driver: cilium
+        loadbalancer_ips:
+          start: "10.5.1.10"
+          end: "10.5.1.100"
+      cluster:
+        <<: *default-cluster
+        cni:
+          driver: cilium
+      gateway:
+        enabled: true
+        driver: cilium
+        internal:
+          ip: 10.5.1.5
+      dns:
+        private_domain: cluster.local
+      identity:
+        enabled: true
+      provisioning:
+        enabled: true
+        image_factory: *default-factory
+        omni: *default-omni
+    expect:
+      flux:
+        - name: image-factory
+          resources:
+            - dependsOn:
+                - gateway-install
+              components:
+                - image-factory/gateway
+        - name: omni
+          resources:
+            - dependsOn:
+                - gateway-install
+              components:
+                - omni/gateway
+                - omni/gateway/wireguard
+
+  # Core pins the external gateway at gateway.external.ip, outside the pool, so
+  # SideroLink pins that address and shares it through the sharing-key.
+  - name: derives the wireguard endpoint from the external gateway ip on cilium
+    values:
+      platform: metal
+      network:
+        cidr_block: 10.5.0.0/16
+        loadbalancer_driver: cilium
+        loadbalancer_ips:
+          start: "10.5.1.10"
+          end: "10.5.1.100"
+      cluster:
+        <<: *default-cluster
+        cni:
+          driver: cilium
+      gateway:
+        enabled: true
+        driver: cilium
+        internal:
+          ip: 10.5.1.5
+        external:
+          ip: 10.5.1.6
+      dns:
+        private_domain: cluster.local
+      identity:
+        enabled: true
+      provisioning:
+        enabled: true
+        omni:
+          etcd_encryption_key: |
+            -----BEGIN PGP PRIVATE KEY BLOCK-----
+            dGVzdC1rZXktbWF0ZXJpYWw=
+            -----END PGP PRIVATE KEY BLOCK-----
+          initial_admins:
+            - admin@example.com
+    expect:
+      flux:
+        - name: omni
+          install:
+            substitutions:
+              omni_wireguard_advertised_endpoint: "10.5.1.6:30180"
+          resources:
+            - components:
+                - omni/gateway
+                - omni/gateway/wireguard
+              substitutions:
+                wireguard_gateway_ip: "10.5.1.6"
 
   # envoy driver keeps the chart's own dedicated LoadBalancer Service — gateway-routed
   # wireguard is cilium-only for now. The Service's own IP is unknowable ahead of an
@@ -1004,7 +1127,7 @@ cases:
               omni_wireguard_advertised_endpoint: 10.5.0.10:30180
           resources:
             - dependsOn:
-                - gateway-resources
+                - gateway-install
               components:
                 - omni/gateway
       config:
