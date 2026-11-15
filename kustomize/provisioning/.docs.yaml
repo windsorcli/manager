@@ -96,8 +96,8 @@ components:
     description: "Helm release of the Sidero Labs `omni` chart in `provisioning`, from `oci://ghcr.io/siderolabs/charts`. The fleet's self-hosted Talos control plane — embedded etcd, own TLS, SideroLink, Keycloak SAML."
   omni/etcd-key:
     facet: omni
-    enable_when: "`provisioning.omni.etcd_encryption_key` is unset outside dev mode"
-    description: "Job that generates Omni's etcd encryption key once and stores it in the `omni-etcd-encryption-key-generated` Secret. Never replaces an existing Secret."
+    enable_when: "`provisioning.omni.etcd_encryption_key` is unset"
+    description: "Job that generates Omni's etcd encryption key once and writes it into the `omni-etcd-encryption-key-generated` Secret. Never replaces a key already stored there."
   omni/saml-client:
     facet: omni
     enable_when: "always"
