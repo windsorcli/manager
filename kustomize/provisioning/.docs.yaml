@@ -94,6 +94,10 @@ components:
     facet: omni
     enable_when: "`provisioning.enabled == true`"
     description: "Helm release of the Sidero Labs `omni` chart in `provisioning`, from `oci://ghcr.io/siderolabs/charts`. The fleet's self-hosted Talos control plane — embedded etcd, own TLS, SideroLink, Keycloak SAML."
+  omni/etcd-key:
+    facet: omni
+    enable_when: "`provisioning.omni.etcd_encryption_key` is unset outside dev mode"
+    description: "Job that generates Omni's etcd encryption key once and stores it in the `omni-etcd-encryption-key-generated` Secret. Never replaces an existing Secret."
   omni/saml-client:
     facet: omni
     enable_when: "always"
@@ -121,7 +125,7 @@ components:
   omni/gateway/wireguard:
     facet: omni
     enable_when: "cilium gateway driver and non-NodePort load-balancer mode"
-    description: "A dedicated Gateway sharing the shared gateway's external IP (Cilium `lbipam.cilium.io/sharing-key`) for SideroLink WireGuard, instead of a dedicated Service."
+    description: "A dedicated Gateway on the external gateway's IP (`gateway.external.ip`, else the first `network.loadbalancer_ips` address) with Cilium's `lbipam.cilium.io/sharing-key`, for SideroLink WireGuard."
 
 dependencies:
   provisioning-base:

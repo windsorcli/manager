@@ -1,0 +1,107 @@
+# Generates Omni's etcd encryption key once and stores it in a Secret. Never replaces an
+# existing Secret: a new key would leave Omni's etcd data unreadable.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: omni-etcd-key
+  namespace: provisioning
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: omni-etcd-key
+  namespace: provisioning
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames: ["omni-etcd-encryption-key-generated"]
+    verbs: ["get"]
+  # create cannot be scoped by resourceNames.
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: omni-etcd-key
+  namespace: provisioning
+subjects:
+  - kind: ServiceAccount
+    name: omni-etcd-key
+    namespace: provisioning
+roleRef:
+  kind: Role
+  name: omni-etcd-key
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: omni-etcd-key
+  namespace: provisioning
+  annotations:
+    kustomize.toolkit.fluxcd.io/force: enabled
+spec:
+  backoffLimit: 10
+  ttlSecondsAfterFinished: 86400
+  activeDeadlineSeconds: 600
+  template:
+    spec:
+      restartPolicy: Never
+      serviceAccountName: omni-etcd-key
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+      volumes:
+        - name: work
+          emptyDir:
+            medium: Memory
+            sizeLimit: 1Mi
+      initContainers:
+        - name: generate-key
+          # artifact: type=image name=docker.io/library/fedora
+          image: fedora:43@sha256:f01112b9a1f1d0504ad962d9adfa401425033f8ab067e0a821904ebdde5b8ca5
+          volumeMounts:
+            - name: work
+              mountPath: /work
+          env:
+            - name: HOME
+              value: /work
+            - name: GNUPGHOME
+              value: /work/gnupg
+          # $${...} are shell variables; ${...} are Windsor substitutions.
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -eu
+              umask 077
+              mkdir -p "$${GNUPGHOME}"
+              # Omni needs an unprotected, non-expiring key with an encryption subkey.
+              gpg --batch --passphrase '' --quick-generate-key \
+                'Omni etcd encryption <omni@windsor.local>' ed25519 cert never
+              fpr=$(gpg --batch --with-colons --list-keys | awk -F: '/^fpr/ { print $$10; exit }')
+              gpg --batch --passphrase '' --quick-add-key "$${fpr}" cv25519 encr never
+              gpg --batch --armor --export-secret-keys > /work/omni.asc
+              gpgconf --kill all
+      containers:
+        - name: store-key
+          # artifact: type=image name=docker.io/alpine/k8s
+          image: alpine/k8s:1.37.2@sha256:7a82aeefea3d554a43a8676b137f2b88bae6c1fe11c13862b191b3a086cc28c0
+          volumeMounts:
+            - name: work
+              mountPath: /work
+          env:
+            - name: HOME
+              value: /work
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -eu
+              if kubectl get secret omni-etcd-encryption-key-generated -n provisioning >/dev/null 2>&1; then
+                echo "omni-etcd-encryption-key-generated already exists"
+                exit 0
+              fi
+              kubectl create secret generic omni-etcd-encryption-key-generated \
+                -n provisioning --from-file=omni.asc=/work/omni.asc
