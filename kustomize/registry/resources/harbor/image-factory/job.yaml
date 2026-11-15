@@ -19,8 +19,8 @@ spec:
       restartPolicy: Never
       securityContext:
         runAsNonRoot: true
-        runAsUser: 1000
-        runAsGroup: 1000
+        runAsUser: 65532
+        runAsGroup: 65532
         seccompProfile:
           type: RuntimeDefault
       volumes:
@@ -30,8 +30,8 @@ spec:
             sizeLimit: 1Mi
       containers:
         - name: configure-image-factory-auth
-          # artifact: type=image name=docker.io/alpine/k8s
-          image: alpine/k8s:1.37.2@sha256:7a82aeefea3d554a43a8676b137f2b88bae6c1fe11c13862b191b3a086cc28c0
+          # artifact: type=image name=ghcr.io/windsorcli/utils
+          image: ghcr.io/windsorcli/utils:1.37.2-r1@sha256:fe4838c4687df97b318d83138801592e07fcaab9df091a883bb121045958b38e
           volumeMounts:
             - name: work
               mountPath: /work
@@ -111,8 +111,7 @@ spec:
               if [ -n "$${robot_id}" ]; then
                 robot_name=$(jq -r --arg id "$${robot_id}" '[.[] | select((.id|tostring) == $id)][0].name' /work/robots.json)
                 # PATCH honors a client-supplied secret (unlike POST below, which doesn't).
-                robot_secret_raw=$(head -c 1024 /dev/urandom | tr -dc 'A-Za-z0-9')
-                robot_secret="$${robot_secret_raw:0:40}"
+                robot_secret=$(head -c 1024 /dev/urandom | tr -dc 'A-Za-z0-9' | cut -c 1-40)
                 body=$(jq -n --arg s "$${robot_secret}" '{secret: $s}')
                 http_code=$(curl -s -o /work/refresh-response -w '%{http_code}' \
                   --connect-timeout 5 --max-time 15 -u "admin:$${HARBOR_ADMIN_PASSWORD}" \
