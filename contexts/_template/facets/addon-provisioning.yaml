@@ -465,3 +465,14 @@ flux:
           - grafana/dashboards/omni
         timeout: 5m
         interval: 5m
+
+messages:
+  - when: provisioning_effective.omni_generated_key == true
+    text: |-
+      Omni's etcd encryption key was generated in-cluster and exists nowhere else.
+      Export it and store it outside the cluster, for example in your secrets manager:
+
+        kubectl get secret omni-etcd-encryption-key-generated -n provisioning \
+          -o jsonpath='{.data.omni\.asc}' | base64 -d
+
+      Without that copy, losing the Secret leaves Omni's etcd data unreadable.
