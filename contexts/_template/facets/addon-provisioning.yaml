@@ -20,10 +20,6 @@ requires:
     paths:
       - gateway.enabled
     message: Omni's UI/API, Kubernetes proxy, and SideroLink machine API are reached over HTTPS through the cluster gateway — enable the gateway.
-  - when: provisioning_effective.omni == true && dev != true
-    paths:
-      - provisioning.omni.etcd_encryption_key
-    message: Omni needs a GPG-armored private key to decrypt its etcd master key. Generate one with `(export GNUPGHOME=$(mktemp -d); gpg --batch --passphrase '' --quick-gen-key x; gpg -a --export-secret-key > omni.asc; rm -rf $GNUPGHOME)` and set provisioning.omni.etcd_encryption_key via a secret() reference.
   - when: >-
       provisioning_effective.omni == true && dev != true &&
       omni_wireguard.gateway_routed == true && omni_wireguard.gateway_ip == '' &&
@@ -122,6 +118,10 @@ config:
       omni: >-
         ${(provisioning.enabled == true || provisioning.omni.enabled == true) &&
         identity.enabled != false}
+      # No operator key: the omni/etcd-key Job generates one in-cluster.
+      omni_generated_key: >-
+        ${(provisioning.enabled == true || provisioning.omni.enabled == true) &&
+        identity.enabled != false && (provisioning.omni.etcd_encryption_key ?? '') == ''}
       metrics: "${(telemetry.metrics.enabled ?? false) == true}"
       harbor: "${(registry_effective.driver ?? '') == 'harbor'}"
       # An explicit schematic registry wins; else the registry capability's own.
@@ -211,35 +211,6 @@ config:
         hostports: >-
           ${let port = string(provisioning.omni.wireguard.node_port ?? 30180);
           ["8080:30080/tcp", "8443:30443/tcp", port + ":" + port + "/udp"]}
-
-  # Split from the block above so the dev-only key can be a plain literal rather
-  # than an expression string (the expression grammar has no escape for embedded
-  # newlines). Same shape as Core's dev-vs-supplied admin secret: an operator's own
-  # key always wins; the fixed key below only fills in under dev == true.
-  - name: omni_effective
-    when: (provisioning.omni.etcd_encryption_key ?? '') != ''
-    value:
-      etcd_encryption_key: ${provisioning.omni.etcd_encryption_key}
-
-  - name: omni_effective
-    when: (provisioning.omni.etcd_encryption_key ?? '') == '' && dev == true
-    value:
-      etcd_encryption_key: |
-        -----BEGIN PGP PRIVATE KEY BLOCK-----
-
-        lFgEam/o7RYJKwYBBAHaRw8BAQdAvJ9sgNU/mNzzUURBYW6rkxtT4CG3gBGpE+eE
-        Zb2p0doAAQC6a3yRWocfjRbzoj0kbi1Kaf6J2RVYSJIeXIibogXNfw5RtBZvbW5p
-        LWRldkB3aW5kc29yLmxvY2FsiJkEExYKAEEWIQQCFqLg03r7RzBHWbarvUkg+WLH
-        RAUCam/o7QIbAwUJBaOagAULCQgHAgIiAgYVCgkICwIEFgIDAQIeBwIXgAAKCRCr
-        vUkg+WLHRNj1AP9fTur/3Cq1p201dcKiEKTK11f3f94RsM7OL/H5dqS+hAD/Wq85
-        8HRIUTCBxYuHUN/avZsqNrgKJp+kQ3Jn7zsacwCcXQRqb+jtEgorBgEEAZdVAQUB
-        AQdABe+v5DT6Lecck95BrSJPhgjTkvm+cusXbfcF5Sj4pzkDAQgHAAD/aD9EB6jX
-        l0czZpI3Z/4giLs+zY5F3fl1MVx3uXAJZugQJYh4BBgWCgAgFiEEAhai4NN6+0cw
-        R1m2q71JIPlix0QFAmpv6O0CGwwACgkQq71JIPlix0Tq9QEA/56y3LK4fPcMtSML
-        jyCiP+FVoAB7rXpg+V0ATF/PAQ4BAKf6DkIvk2L2r2u3x/F0ARkZZTnSwBX84lY2
-        /YJzgncL
-        =ujZb
-        -----END PGP PRIVATE KEY BLOCK-----
 
 # =============================================================================
 # Flux systems — image factory, omni
@@ -344,9 +315,6 @@ flux:
     dependsOn:
       - provisioning-base-install
     secrets:
-      omni-etcd-encryption-key:
-        data:
-          omni.asc: ${omni_effective.etcd_encryption_key}
       # Empty unless provisioning.omni.service_account_key is set — harmless either
       # way, since omni/exporter (the only consumer) is excluded from components in
       # that case too.
@@ -356,6 +324,7 @@ flux:
     install:
       components:
         - omni
+        - "${provisioning_effective.omni_generated_key == true ? 'omni/etcd-key' : ''}"
         - "${provisioning_effective.metrics == true ? 'omni/prometheus' : ''}"
         - "${lb_effective.mode == 'nodeport' ? 'omni/nodeport' : ''}"
         - "${lb_effective.mode != 'nodeport' && gateway.driver != 'cilium' ? 'omni/loadbalancer' : ''}"
@@ -435,6 +404,15 @@ flux:
         timeout: 25m
         interval: 5m
 
+  # An operator's key. Otherwise the omni/etcd-key Job creates its own Secret, which a
+  # secrets: entry here would not own.
+  - name: omni
+    when: provisioning_effective.omni == true && provisioning_effective.omni_generated_key != true
+    secrets:
+      omni-etcd-encryption-key:
+        data:
+          omni.asc: ${provisioning.omni.etcd_encryption_key}
+
   # Both contribute into config-observability.yaml's manager-observability
   # Kustomization rather than owning their own — see that facet's comment for why
   # (name collision risk with Core's own observability/telemetry).
@@ -457,3 +435,14 @@ flux:
           - grafana/dashboards/omni
         timeout: 5m
         interval: 5m
+
+messages:
+  - when: provisioning_effective.omni_generated_key == true && dev != true
+    text: |-
+      Omni's etcd encryption key was generated in-cluster and exists nowhere else.
+      Export it and store it outside the cluster, for example in your secrets manager:
+
+        kubectl get secret omni-etcd-encryption-key-generated -n provisioning \
+          -o jsonpath='{.data.omni\.asc}' | base64 -d
+
+      Without that copy, losing the Secret leaves Omni's etcd data unreadable.

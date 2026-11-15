@@ -104,9 +104,10 @@ dependencies:
 - **An identity provider.** Omni authenticates operators via SAML, registered as a client
   of Core's platform Keycloak realm by an admin-API Job (`omni/saml-client`) — Core's
   `identity` add-on never enables the CRD-based client registration path.
-- **An etcd encryption key** outside dev mode, and **at least one bootstrap admin email** —
-  the chart refuses to start without either. See `provisioning.omni.etcd_encryption_key` and
-  `provisioning.omni.initial_admins`.
+- **At least one bootstrap admin email** — the chart refuses to start without one. See
+  `provisioning.omni.initial_admins`. The etcd encryption key comes from
+  `provisioning.omni.etcd_encryption_key`, or else the `omni/etcd-key` Job, which
+  generates one in-cluster.
 - **A gateway.** Omni's UI/API, Kubernetes proxy, and SideroLink machine API are all
   reached through Core's canonical `external` Gateway.
 
@@ -173,6 +174,7 @@ operator's browser use this same URL.
 | Component | Enable when | Effect |
 |---|---|---|
 | `omni` | `provisioning.enabled == true` | Helm release of the Sidero Labs `omni` chart in `provisioning`, from `oci://ghcr.io/siderolabs/charts`. The fleet's self-hosted Talos control plane — embedded etcd, own TLS, SideroLink, Keycloak SAML. |
+| `omni/etcd-key` | `provisioning.omni.etcd_encryption_key` is unset | Job that generates Omni's etcd encryption key once and writes it into the `omni-etcd-encryption-key-generated` Secret. Never replaces a key already stored there. |
 | `omni/saml-client` | always | Job that registers Omni as a SAML client of the platform Keycloak realm over the admin REST API. |
 | `omni/prometheus` | `telemetry.metrics.enabled == true` | Metrics Service and ServiceMonitor for Omni's native metrics. |
 | `omni/nodeport` | NodePort load-balancer mode (e.g. docker-desktop) | Dedicated NodePort Service for SideroLink WireGuard. |
@@ -239,7 +241,6 @@ provisioning:
   enabled: true
   omni:
     hostname: omni.example.com
-    etcd_encryption_key: ${secret("Developer", "omni", "etcd_encryption_key")}
     initial_admins:
       - admin@example.com
 ```

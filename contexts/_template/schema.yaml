@@ -168,7 +168,7 @@ properties:
           etcd_encryption_key:
             type: string
             sensitive: true
-            description: ASCII-armored GPG private key Omni uses to decrypt its etcd master key (config.storage.default.etcd.privateKeySource). Generate with `(export GNUPGHOME=$(mktemp -d); gpg --batch --passphrase '' --quick-gen-key x; gpg -a --export-secret-key > omni.asc; rm -rf $GNUPGHOME)`. Set via a secret() reference. Required outside dev mode; dev mode falls back to a fixed key stored in the facet.
+            description: ASCII-armored GPG private key Omni uses to decrypt its etcd master key (config.storage.default.etcd.privateKeySource). Generate with `(export GNUPGHOME=$(mktemp -d); gpg --batch --passphrase '' --quick-gen-key x; gpg -a --export-secret-key > omni.asc; rm -rf $GNUPGHOME)`. Set via a secret() reference. When unset, the omni/etcd-key Job generates one in-cluster. Switching an installed Omni between a supplied and a generated key changes the key and leaves its etcd data unreadable.
           initial_admins:
             type: array
             items:

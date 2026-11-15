@@ -828,9 +828,9 @@ cases:
               omni_persistence_size: 32Gi
               omni_wireguard_advertised_endpoint: 203.0.113.10:30180
 
-  # Missing the GPG-armored etcd encryption key fails composition outside dev mode —
-  # Terraform cannot generate one (no provider does), so it is always operator-supplied.
-  - name: fails without an etcd encryption key
+  # Without an operator key, the omni/etcd-key Job generates one
+  # in-cluster, and the facet places no Secret of its own.
+  - name: generates the etcd encryption key in-cluster when none is supplied
     values:
       platform: metal
       network: *default-network
@@ -841,11 +841,59 @@ cases:
         enabled: true
       provisioning:
         enabled: true
-    expectError: true
+        image_factory:
+          enabled: false
+        omni:
+          wireguard:
+            advertised_endpoint: 203.0.113.10:50180
+          initial_admins:
+            - admin@example.com
+    expect:
+      flux:
+        - name: omni
+          install:
+            components:
+              - omni
+              - omni/etcd-key
+    exclude:
+      flux:
+        - name: omni
+          secrets:
+            omni-etcd-encryption-key: {}
 
-  # dev mode falls back to a fixed dev-only key, the same shape as Core's dev admin
-  # password — no key required from the operator.
-  - name: dev mode supplies a default etcd encryption key
+  - name: places the supplied etcd encryption key without the generator job
+    values:
+      platform: metal
+      network: *default-network
+      cluster: *default-cluster
+      dns:
+        private_domain: cluster.local
+      identity:
+        enabled: true
+      provisioning:
+        enabled: true
+        image_factory:
+          enabled: false
+        omni: *default-omni
+    expect:
+      flux:
+        - name: omni
+          install:
+            components:
+              - omni
+          secrets:
+            omni-etcd-encryption-key:
+              data:
+                omni.asc: "${provisioning.omni.etcd_encryption_key}"
+    exclude:
+      flux:
+        - name: omni
+          install:
+            components:
+              - omni/etcd-key
+
+  # dev mode generates its key in-cluster too, and seeds Core's dev admin as Omni's admin.
+  - name: dev mode generates the etcd encryption key and seeds the dev admin
     values:
       dev: true
       platform: metal
@@ -866,10 +914,16 @@ cases:
           install:
             components:
               - omni
+              - omni/etcd-key
             substitutions:
               # Core's own dev admin (keycloak/realm/dev-user), so a SAML login
               # with that identity is recognized immediately.
               omni_initial_admins: "[dev-admin@local.test]"
+    exclude:
+      flux:
+        - name: omni
+          secrets:
+            omni-etcd-encryption-key: {}
 
   # A cloud-managed LoadBalancer controller's external IP is unknowable before the
   # Service exists (aws here; hetzner/azure are the same shape), so outside dev mode

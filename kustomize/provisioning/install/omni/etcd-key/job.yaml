@@ -1,0 +1,107 @@
+# Generates Omni's etcd encryption key once and writes it into the Secret below. Never
+# replaces a key already there: a new key would leave Omni's etcd data unreadable.
+
+# Flux creates this Secret empty once, then never applies or prunes it.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: omni-etcd-encryption-key-generated
+  namespace: provisioning
+  annotations:
+    kustomize.toolkit.fluxcd.io/ssa: IfNotPresent
+    kustomize.toolkit.fluxcd.io/prune: disabled
+type: Opaque
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: omni-etcd-key
+  namespace: provisioning
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: omni-etcd-key
+  namespace: provisioning
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames: ["omni-etcd-encryption-key-generated"]
+    verbs: ["get", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: omni-etcd-key
+  namespace: provisioning
+subjects:
+  - kind: ServiceAccount
+    name: omni-etcd-key
+    namespace: provisioning
+roleRef:
+  kind: Role
+  name: omni-etcd-key
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: omni-etcd-key
+  namespace: provisioning
+  annotations:
+    kustomize.toolkit.fluxcd.io/force: enabled
+spec:
+  backoffLimit: 10
+  ttlSecondsAfterFinished: 86400
+  activeDeadlineSeconds: 600
+  template:
+    spec:
+      restartPolicy: Never
+      serviceAccountName: omni-etcd-key
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+      volumes:
+        - name: work
+          emptyDir:
+            medium: Memory
+            sizeLimit: 1Mi
+      containers:
+        - name: generate-key
+          # artifact: type=image name=ghcr.io/windsorcli/utils
+          image: ghcr.io/windsorcli/utils:1.37.2-r1@sha256:fe4838c4687df97b318d83138801592e07fcaab9df091a883bb121045958b38e
+          volumeMounts:
+            - name: work
+              mountPath: /work
+          env:
+            - name: HOME
+              value: /work
+            - name: GNUPGHOME
+              value: /work/gnupg
+          # $${...} are shell variables; ${...} are Windsor substitutions.
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -eu
+              umask 077
+              secret=omni-etcd-encryption-key-generated
+              state=$(kubectl get secret "$${secret}" -n provisioning \
+                -o jsonpath='{.metadata.resourceVersion} {.data.omni\.asc}')
+              rv=$${state%% *}
+              if [ "$${state#* }" != "" ]; then
+                echo "$${secret} already holds a key"
+                exit 0
+              fi
+              mkdir -p "$${GNUPGHOME}"
+              # Omni needs an unprotected, non-expiring key with an encryption subkey.
+              gpg --batch --passphrase '' --quick-generate-key \
+                'Omni etcd encryption <omni@windsor.local>' ed25519 cert never
+              fpr=$(gpg --batch --with-colons --list-keys | awk -F: '/^fpr/ { print $$10; exit }')
+              gpg --batch --passphrase '' --quick-add-key "$${fpr}" cv25519 encr never
+              gpg --batch --armor --export-secret-keys > /work/omni.asc
+              gpgconf --kill all
+              # The test op makes the write fail if the Secret changed since the read.
+              printf '[{"op":"test","path":"/metadata/resourceVersion","value":"%s"},{"op":"add","path":"/data","value":{"omni.asc":"%s"}}]' \
+                "$${rv}" "$(base64 < /work/omni.asc | tr -d '\n')" > /work/patch.json
+              kubectl patch secret "$${secret}" -n provisioning --type=json --patch-file=/work/patch.json
