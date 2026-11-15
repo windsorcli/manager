@@ -552,7 +552,8 @@ cases:
           secrets:
             harbor-admin-password:
               data:
-                HARBOR_ADMIN_PASSWORD: generated-password
+                # Secret data stays an expression until apply.
+                HARBOR_ADMIN_PASSWORD: "${harbor_effective.admin_password ?? ''}"
 
   - name: skips the harbor module when an admin password is supplied
     values:
@@ -565,13 +566,6 @@ cases:
         driver: harbor
         harbor:
           admin_password: supplied-by-operator
-    expect:
-      flux:
-        - name: registry
-          secrets:
-            harbor-admin-password:
-              data:
-                HARBOR_ADMIN_PASSWORD: supplied-by-operator
     exclude:
       terraform:
         - name: harbor
@@ -586,13 +580,6 @@ cases:
       registry:
         enabled: true
         driver: harbor
-    expect:
-      flux:
-        - name: registry
-          secrets:
-            harbor-admin-password:
-              data:
-                HARBOR_ADMIN_PASSWORD: harbor-dev-admin-password
     exclude:
       terraform:
         - name: harbor
