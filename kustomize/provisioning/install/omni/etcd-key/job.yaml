@@ -1,5 +1,17 @@
-# Generates Omni's etcd encryption key once and stores it in a Secret. Never replaces an
-# existing Secret: a new key would leave Omni's etcd data unreadable.
+# Generates Omni's etcd encryption key once and writes it into the Secret below. Never
+# replaces a key already there: a new key would leave Omni's etcd data unreadable.
+
+# Flux creates this Secret empty once, then never applies or prunes it.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: omni-etcd-encryption-key-generated
+  namespace: provisioning
+  annotations:
+    kustomize.toolkit.fluxcd.io/ssa: IfNotPresent
+    kustomize.toolkit.fluxcd.io/prune: disabled
+type: Opaque
+---
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -15,11 +27,7 @@ rules:
   - apiGroups: [""]
     resources: ["secrets"]
     resourceNames: ["omni-etcd-encryption-key-generated"]
-    verbs: ["get"]
-  # create cannot be scoped by resourceNames.
-  - apiGroups: [""]
-    resources: ["secrets"]
-    verbs: ["create"]
+    verbs: ["get", "patch"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
@@ -95,13 +103,21 @@ spec:
           env:
             - name: HOME
               value: /work
+          # $${...} are shell variables; ${...} are Windsor substitutions.
           command: ["/bin/sh", "-c"]
           args:
             - |
               set -eu
-              if kubectl get secret omni-etcd-encryption-key-generated -n provisioning >/dev/null 2>&1; then
-                echo "omni-etcd-encryption-key-generated already exists"
+              umask 077
+              secret=omni-etcd-encryption-key-generated
+              state=$(kubectl get secret "$${secret}" -n provisioning \
+                -o jsonpath='{.metadata.resourceVersion} {.data.omni\.asc}')
+              rv=$${state%% *}
+              if [ "$${state#* }" != "" ]; then
+                echo "$${secret} already holds a key"
                 exit 0
               fi
-              kubectl create secret generic omni-etcd-encryption-key-generated \
-                -n provisioning --from-file=omni.asc=/work/omni.asc
+              # The test op makes the write fail if the Secret changed since the read.
+              printf '[{"op":"test","path":"/metadata/resourceVersion","value":"%s"},{"op":"add","path":"/data","value":{"omni.asc":"%s"}}]' \
+                "$${rv}" "$(base64 < /work/omni.asc | tr -d '\n')" > /work/patch.json
+              kubectl patch secret "$${secret}" -n provisioning --type=json --patch-file=/work/patch.json
