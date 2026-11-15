@@ -60,17 +60,17 @@ spec:
       serviceAccountName: omni-etcd-key
       securityContext:
         runAsNonRoot: true
-        runAsUser: 1000
-        runAsGroup: 1000
+        runAsUser: 65532
+        runAsGroup: 65532
       volumes:
         - name: work
           emptyDir:
             medium: Memory
             sizeLimit: 1Mi
-      initContainers:
+      containers:
         - name: generate-key
-          # artifact: type=image name=docker.io/library/fedora
-          image: fedora:43@sha256:f01112b9a1f1d0504ad962d9adfa401425033f8ab067e0a821904ebdde5b8ca5
+          # artifact: type=image name=ghcr.io/windsorcli/utils
+          image: ghcr.io/windsorcli/utils:1.37.2-r1@sha256:fe4838c4687df97b318d83138801592e07fcaab9df091a883bb121045958b38e
           volumeMounts:
             - name: work
               mountPath: /work
@@ -85,30 +85,6 @@ spec:
             - |
               set -eu
               umask 077
-              mkdir -p "$${GNUPGHOME}"
-              # Omni needs an unprotected, non-expiring key with an encryption subkey.
-              gpg --batch --passphrase '' --quick-generate-key \
-                'Omni etcd encryption <omni@windsor.local>' ed25519 cert never
-              fpr=$(gpg --batch --with-colons --list-keys | awk -F: '/^fpr/ { print $$10; exit }')
-              gpg --batch --passphrase '' --quick-add-key "$${fpr}" cv25519 encr never
-              gpg --batch --armor --export-secret-keys > /work/omni.asc
-              gpgconf --kill all
-      containers:
-        - name: store-key
-          # artifact: type=image name=docker.io/alpine/k8s
-          image: alpine/k8s:1.37.2@sha256:7a82aeefea3d554a43a8676b137f2b88bae6c1fe11c13862b191b3a086cc28c0
-          volumeMounts:
-            - name: work
-              mountPath: /work
-          env:
-            - name: HOME
-              value: /work
-          # $${...} are shell variables; ${...} are Windsor substitutions.
-          command: ["/bin/sh", "-c"]
-          args:
-            - |
-              set -eu
-              umask 077
               secret=omni-etcd-encryption-key-generated
               state=$(kubectl get secret "$${secret}" -n provisioning \
                 -o jsonpath='{.metadata.resourceVersion} {.data.omni\.asc}')
@@ -117,6 +93,14 @@ spec:
                 echo "$${secret} already holds a key"
                 exit 0
               fi
+              mkdir -p "$${GNUPGHOME}"
+              # Omni needs an unprotected, non-expiring key with an encryption subkey.
+              gpg --batch --passphrase '' --quick-generate-key \
+                'Omni etcd encryption <omni@windsor.local>' ed25519 cert never
+              fpr=$(gpg --batch --with-colons --list-keys | awk -F: '/^fpr/ { print $$10; exit }')
+              gpg --batch --passphrase '' --quick-add-key "$${fpr}" cv25519 encr never
+              gpg --batch --armor --export-secret-keys > /work/omni.asc
+              gpgconf --kill all
               # The test op makes the write fail if the Secret changed since the read.
               printf '[{"op":"test","path":"/metadata/resourceVersion","value":"%s"},{"op":"add","path":"/data","value":{"omni.asc":"%s"}}]' \
                 "$${rv}" "$(base64 < /work/omni.asc | tr -d '\n')" > /work/patch.json

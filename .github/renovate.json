@@ -31,6 +31,13 @@
       "allowedVersions": "<1.13"
     },
     {
+      "description": "Core's utils image tags are the kubectl version plus an -rN rebuild counter",
+      "matchPackageNames": [
+        "ghcr.io/windsorcli/utils"
+      ],
+      "versioning": "regex:^(?<major>\\d+)\\.(?<minor>\\d+)\\.(?<patch>\\d+)-r(?<build>\\d+)$"
+    },
+    {
       "matchDatasources": [
         "terraform-provider"
       ],
