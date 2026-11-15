@@ -54,8 +54,8 @@ spec:
       serviceAccountName: keycloak-omni-saml-client
       securityContext:
         runAsNonRoot: true
-        runAsUser: 1000
-        runAsGroup: 1000
+        runAsUser: 65532
+        runAsGroup: 65532
       volumes:
         - name: work
           emptyDir:
@@ -63,8 +63,8 @@ spec:
             sizeLimit: 1Mi
       containers:
         - name: register-client
-          # artifact: type=image name=docker.io/alpine/k8s
-          image: alpine/k8s:1.37.2@sha256:7a82aeefea3d554a43a8676b137f2b88bae6c1fe11c13862b191b3a086cc28c0
+          # artifact: type=image name=ghcr.io/windsorcli/utils
+          image: ghcr.io/windsorcli/utils:1.37.2-r1@sha256:fe4838c4687df97b318d83138801592e07fcaab9df091a883bb121045958b38e
           volumeMounts:
             - name: work
               mountPath: /work
