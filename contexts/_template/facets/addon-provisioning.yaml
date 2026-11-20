@@ -418,6 +418,8 @@ flux:
   # (name collision risk with Core's own observability/telemetry).
   - name: manager-observability
     when: provisioning.image_factory.enabled == true && provisioning_effective.metrics == true
+    dependsOn:
+      - provisioning-base-install
     resources:
       - components:
           - prometheus/alerts/image-factory
@@ -429,6 +431,8 @@ flux:
   # telemetry.metrics.enabled already scrapes.
   - name: manager-observability
     when: provisioning_effective.omni == true && provisioning_effective.metrics == true
+    dependsOn:
+      - provisioning-base-install
     resources:
       - components:
           - prometheus/alerts/omni

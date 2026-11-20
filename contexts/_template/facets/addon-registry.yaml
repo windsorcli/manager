@@ -281,6 +281,8 @@ flux:
   # (name collision risk with Core's own observability/telemetry).
   - name: manager-observability
     when: registry_effective.harbor == true && (telemetry.metrics.enabled ?? false) == true
+    dependsOn:
+      - registry-install
     resources:
       - components:
           - prometheus/alerts/harbor
