@@ -52,7 +52,7 @@ flowchart LR
   schematic[(Schematic registry<br/>OCI, push access)]
   cache[(Asset cache<br/>OCI registry or S3)]
   upstream[(ghcr.io/siderolabs<br/>imager · installer · extensions)]
-  gw[Core gateway<br/>external · Gateway API]
+  gw[Core gateway<br/>external or internal · Gateway API]
   machines[Talos machines]
 
   flux ==> hr
@@ -67,11 +67,13 @@ flowchart LR
 
 ### Routing
 
-The factory is reachable at `factory.<domain>` through Core's canonical `external` Gateway.
+The factory is reachable at `factory.<domain>` through Core's `external` Gateway. When Core
+builds no external Gateway, as with only a `dns.private_domain`, the route attaches to the
+`internal` Gateway instead.
 The add-on ships one HTTPRoute attached to both the `web-http` and `web-https` listeners,
 which covers the envoy and cilium drivers alike — both implement Gateway API, and Core emits
 the same Gateway either way. The route lives in the resources tier and waits on
-`gateway-resources`, so the listeners exist before it attaches.
+`gateway-install` and attaches once its Gateway is up.
 
 ### Scaling
 
@@ -109,14 +111,15 @@ dependencies:
   `provisioning.omni.etcd_encryption_key`, or else the `omni/etcd-key` Job, which
   generates one in-cluster.
 - **A gateway.** Omni's UI/API, Kubernetes proxy, and SideroLink machine API are all
-  reached through Core's canonical `external` Gateway.
+  reached through Core's `external` Gateway, or its `internal` Gateway when Core builds no
+  external one.
 
 ### Routing
 
 Three HTTPRoutes on the shared gateway — API/UI, Kubernetes proxy, and SideroLink machine
 API — plus SideroLink's own WireGuard exposure, which varies by load-balancer mode: a
 dedicated NodePort or LoadBalancer Service everywhere the gateway driver is envoy or the
-cluster runs in NodePort mode, or a second Gateway sharing the shared one's external IP
+cluster runs in NodePort mode, or a second Gateway sharing the routes' Gateway IP
 (`omni/gateway/wireguard`) when the driver is cilium — see
 [ADR-0005](/docs/adr/0005-siderolink-gateway-exposure.md) for why envoy doesn't get that
 same dedicated-Gateway path yet.
@@ -137,6 +140,7 @@ operator's browser use this same URL.
 | Name | Required when | Effect |
 |---|---|---|
 | `external_domain` | always | Domain the factory is served under; the hostname is `factory.<external_domain>`. Public domain when set, otherwise the private domain or the cluster domain. |
+| `gateway_name` | `image-factory/gateway`, `omni/gateway` | Core Gateway the routes attach to, and the omni-wireguard Gateway's LB-IPAM sharing-key: `external` when Core builds one, else `internal`. |
 | `factory_schematic_registry` | always | OCI registry the factory pushes generated schematics to. Needs push access. Defaults to the registry capability (registry.driver, kustomize/registry/) unless provisioning.image_factory.registry.schematic.registry names an external one. |
 | `factory_schematic_namespace` | optional | Repository path prefix for schematics. Defaults to `siderolabs/image-factory`. |
 | `factory_schematic_repository` | optional | Repository name for schematics. Defaults to `schematics`. |
@@ -166,7 +170,7 @@ operator's browser use this same URL.
 | `image-factory` | `provisioning.image_factory.enabled == true` | Helm release of the Sidero Labs `image-factory` chart in `provisioning`, from `oci://ghcr.io/siderolabs/charts`. Serves the UI, API, and registry frontends on :8080. Runs as uid 1000, non-root, baseline PSA-compatible. The chart supports only the Recreate deployment strategy. |
 | `image-factory/ha` | `topology == 'ha'` | Two replicas with pod anti-affinity across nodes. Redundancy against node loss only — the Recreate strategy means rollouts still have a gap. Safe because builds are stateless: schematics live in the registry, cached assets in the cache backend. |
 | `image-factory/prometheus` | `telemetry.metrics.enabled == true` | Metrics Service on :2122 plus a ServiceMonitor. Both are needed — the chart leaves the metrics Service off by default, so a ServiceMonitor alone would have nothing to scrape. |
-| `image-factory/gateway` | gateway is enabled | HTTPRoute on Core's canonical `external` Gateway, attached to both the web-http and web-https listeners. One route serves both gateway drivers, since envoy and cilium each implement Gateway API. Lives in the resources tier and depends on `gateway-resources`. |
+| `image-factory/gateway` | gateway is enabled | HTTPRoute on Core's `external` Gateway, or on `internal` when Core builds no external one (no `dns.public_domain`). Attaches to both the web-http and web-https listeners. One route serves both gateway drivers, since envoy and cilium each implement Gateway API. Lives in the resources tier and depends on `gateway-install`. |
 | `image-factory/harbor-auth` | the registry capability's driver is harbor | Mounts the dockerconfigjson Secret `harbor/image-factory` writes (kustomize/registry/) and points `DOCKER_CONFIG` at it, so the chart's own OCI client authenticates its pushes. |
 
 ## Components — `omni`
@@ -180,8 +184,8 @@ operator's browser use this same URL.
 | `omni/nodeport` | NodePort load-balancer mode (e.g. docker-desktop) | Dedicated NodePort Service for SideroLink WireGuard. |
 | `omni/loadbalancer` | load-balancer mode and the gateway driver isn't cilium | Dedicated LoadBalancer Service for SideroLink WireGuard. |
 | `omni/exporter` | metrics are enabled and `provisioning.omni.service_account_key` is set | omni_exporter Deployment. Off until an admin creates the Reader-role service account by hand and hands the key to Windsor via a secret() reference. |
-| `omni/gateway` | always | HTTPRoutes on Core's canonical `external` Gateway for Omni's UI/API, Kubernetes proxy, and SideroLink machine API. Lives in the resources tier and depends on `gateway-resources`. |
-| `omni/gateway/wireguard` | cilium gateway driver and non-NodePort load-balancer mode | A dedicated Gateway on the external gateway's IP (`gateway.external.ip`, else the first `network.loadbalancer_ips` address) with Cilium's `lbipam.cilium.io/sharing-key`, for SideroLink WireGuard. |
+| `omni/gateway` | always | HTTPRoutes for Omni's UI/API, Kubernetes proxy, and SideroLink machine API, on Core's `external` Gateway, or on `internal` when Core builds no external one (no `dns.public_domain`). Lives in the resources tier and depends on `gateway-install`. |
+| `omni/gateway/wireguard` | cilium gateway driver and non-NodePort load-balancer mode | A dedicated Gateway for SideroLink WireGuard that shares the routes' Gateway address through Cilium's `lbipam.cilium.io/sharing-key`. With an external gateway that is `gateway.external.ip`, else the first `network.loadbalancer_ips` address; without one it is `gateway.internal.ip`. |
 
 ## Dependencies
 
