@@ -147,10 +147,11 @@ config:
         ${provisioning.image_factory.external_url
           ?? ('https://factory.' + omni_effective.domain + omni_effective.external_port_suffix)}
 
-  # The core Gateway the routes attach to: internal when core builds no external one.
+  # Core's public route target; cores without one always build the external Gateway.
   - name: provisioning_gateway
     value:
-      name: "${(gateway_effective.external_enabled ?? true) == true ? 'external' : 'internal'}"
+      name: "${gateway_effective.public.name ?? 'external'}"
+      ip: "${gateway_effective.public.ip ?? gateway.external.ip ?? network.loadbalancer_ips.start ?? ''}"
 
   # SideroLink WireGuard exposure. On the cilium driver outside NodePort mode, the
   # omni-wireguard Gateway takes the address and LB-IPAM sharing-key of the Gateway
@@ -162,10 +163,7 @@ config:
       gateway_routed: >-
         ${lb_effective.mode != 'nodeport' && gateway.driver == 'cilium' &&
         lb_effective.controller_required != true}
-      gateway_ip: >-
-        ${provisioning_gateway.name == 'external'
-          ? (gateway.external.ip ?? network.loadbalancer_ips.start ?? '')
-          : (gateway.internal.ip ?? '')}
+      gateway_ip: "${provisioning_gateway.ip}"
       # First control-plane address. A remote device dials it, so 127.0.0.1 won't do.
       node_ip: >-
         ${len(terraform_output('compute', 'controlplanes') ?? []) > 0

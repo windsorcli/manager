@@ -62,7 +62,7 @@ Factory's own route already sets.
 | `registry_region` | `distribution/s3` | Region embedded in the S3 v4 signature, from `object_store.region`. |
 | `registry_endpoint` | `distribution/s3` | S3 endpoint the distribution driver writes to, from `object_store.endpoint`. |
 | `external_domain` | `harbor/gateway` | Domain the gateway route publishes under; the hostname is `harbor.<external_domain>`. Public domain when set, otherwise the private domain or the cluster domain. |
-| `gateway_name` | `harbor/gateway` | Core Gateway the route attaches to: `external` when Core builds one, else `internal`. |
+| `gateway_name` | `harbor/gateway` | Core Gateway the route attaches to, from Core's `gateway_effective.public.name`: `external` when Core builds one, else `internal`. |
 | `keycloak_realm` | `harbor/oidc` | Identity realm the OIDC client registers against, from `identity_effective.realm`. |
 | `oidc_issuer` | `harbor/oidc` | External OIDC discovery issuer, from `identity_effective.issuer`. |
 | `oidc_admin_group` | `harbor/oidc` | Keycloak group mapped to Harbor's admin role via the OIDC groups claim. Fixed at `platform-admins`. |

@@ -48,7 +48,7 @@ substitutions:
     description: "Domain the gateway route publishes under; the hostname is `harbor.<external_domain>`. Public domain when set, otherwise the private domain or the cluster domain."
   gateway_name:
     required_when: "`harbor/gateway`"
-    description: "Core Gateway the route attaches to: `external` when Core builds one, else `internal`."
+    description: "Core Gateway the route attaches to, from Core's `gateway_effective.public.name`: `external` when Core builds one, else `internal`."
   keycloak_realm:
     required_when: "`harbor/oidc`"
     description: "Identity realm the OIDC client registers against, from `identity_effective.realm`."

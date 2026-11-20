@@ -1113,8 +1113,8 @@ cases:
                 wireguard_gateway_ip: "10.5.1.6"
 
   # Core builds no external Gateway in certificate-only mode (dns.public.driver with
-  # no dns.public_domain). The manager's core pin predates gateway_effective, so
-  # these cases set the value core computes.
+  # no dns.public_domain). The manager's core pin predates gateway_effective.public,
+  # so these cases set the value core computes.
   - name: attaches routes and wireguard to the internal gateway without an external one
     values:
       platform: metal
@@ -1133,7 +1133,9 @@ cases:
         external:
           ip: 10.5.1.6
       gateway_effective:
-        external_enabled: false
+        public:
+          name: internal
+          ip: 10.5.1.5
       dns:
         private_domain: cluster.local
       identity:
@@ -1186,7 +1188,9 @@ cases:
         external:
           ip: 10.5.1.6
       gateway_effective:
-        external_enabled: true
+        public:
+          name: external
+          ip: 10.5.1.6
       dns:
         public_domain: example.com
         private_domain: cluster.example.com
@@ -1238,7 +1242,9 @@ cases:
         external:
           ip: 10.5.1.6
       gateway_effective:
-        external_enabled: false
+        public:
+          name: internal
+          ip: ""
       dns:
         private_domain: cluster.local
       identity:

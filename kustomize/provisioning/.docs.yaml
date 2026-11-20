@@ -20,7 +20,7 @@ substitutions:
     description: "Domain the factory is served under; the hostname is `factory.<external_domain>`. Public domain when set, otherwise the private domain or the cluster domain."
   gateway_name:
     required_when: "`image-factory/gateway`, `omni/gateway`"
-    description: "Core Gateway the routes attach to, and the omni-wireguard Gateway's LB-IPAM sharing-key: `external` when Core builds one, else `internal`."
+    description: "Core Gateway the routes attach to, and the omni-wireguard Gateway's LB-IPAM sharing-key, from Core's `gateway_effective.public.name`: `external` when Core builds one, else `internal`."
   factory_schematic_registry:
     required_when: "always"
     description: "OCI registry the factory pushes generated schematics to. Needs push access. Defaults to the registry capability (registry.driver, kustomize/registry/) unless provisioning.image_factory.registry.schematic.registry names an external one."
