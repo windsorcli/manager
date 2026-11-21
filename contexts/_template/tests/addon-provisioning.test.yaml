@@ -1132,6 +1132,154 @@ cases:
               substitutions:
                 wireguard_gateway_ip: "10.5.1.6"
 
+  # Core builds no external Gateway in certificate-only mode (dns.public.driver with
+  # no dns.public_domain). The manager's core pin predates gateway_effective.public,
+  # so these cases set the value core computes.
+  - name: attaches routes and wireguard to the internal gateway without an external one
+    values:
+      platform: metal
+      network:
+        cidr_block: 10.5.0.0/16
+        loadbalancer_driver: cilium
+      cluster:
+        <<: *default-cluster
+        cni:
+          driver: cilium
+      gateway:
+        enabled: true
+        driver: cilium
+        internal:
+          ip: 10.5.1.5
+        external:
+          ip: 10.5.1.6
+      gateway_effective:
+        public:
+          name: internal
+          ip: 10.5.1.5
+      dns:
+        private_domain: cluster.local
+      identity:
+        enabled: true
+      provisioning:
+        enabled: true
+        image_factory: *default-factory
+        omni:
+          etcd_encryption_key: |
+            -----BEGIN PGP PRIVATE KEY BLOCK-----
+            dGVzdC1rZXktbWF0ZXJpYWw=
+            -----END PGP PRIVATE KEY BLOCK-----
+          initial_admins:
+            - admin@example.com
+    expect:
+      flux:
+        - name: image-factory
+          resources:
+            - components:
+                - image-factory/gateway
+              substitutions:
+                gateway_name: internal
+        - name: omni
+          install:
+            substitutions:
+              omni_wireguard_advertised_endpoint: "10.5.1.5:30180"
+          resources:
+            - components:
+                - omni/gateway
+                - omni/gateway/wireguard
+              substitutions:
+                gateway_name: internal
+                wireguard_gateway_ip: "10.5.1.5"
+
+  - name: keeps routes and wireguard on the external gateway when core builds one
+    values:
+      platform: metal
+      network:
+        cidr_block: 10.5.0.0/16
+        loadbalancer_driver: cilium
+      cluster:
+        <<: *default-cluster
+        cni:
+          driver: cilium
+      gateway:
+        enabled: true
+        driver: cilium
+        internal:
+          ip: 10.5.1.5
+        external:
+          ip: 10.5.1.6
+      gateway_effective:
+        public:
+          name: external
+          ip: 10.5.1.6
+      dns:
+        public_domain: example.com
+        private_domain: cluster.example.com
+      identity:
+        enabled: true
+      provisioning:
+        enabled: true
+        image_factory: *default-factory
+        omni:
+          etcd_encryption_key: |
+            -----BEGIN PGP PRIVATE KEY BLOCK-----
+            dGVzdC1rZXktbWF0ZXJpYWw=
+            -----END PGP PRIVATE KEY BLOCK-----
+          initial_admins:
+            - admin@example.com
+    expect:
+      flux:
+        - name: image-factory
+          resources:
+            - components:
+                - image-factory/gateway
+              substitutions:
+                gateway_name: external
+        - name: omni
+          install:
+            substitutions:
+              omni_wireguard_advertised_endpoint: "10.5.1.6:30180"
+          resources:
+            - components:
+                - omni/gateway
+                - omni/gateway/wireguard
+              substitutions:
+                gateway_name: external
+                wireguard_gateway_ip: "10.5.1.6"
+
+  - name: fails without an internal gateway ip when there is no external gateway
+    values:
+      platform: metal
+      network:
+        cidr_block: 10.5.0.0/16
+        loadbalancer_driver: cilium
+      cluster:
+        <<: *default-cluster
+        cni:
+          driver: cilium
+      gateway:
+        enabled: true
+        driver: cilium
+        external:
+          ip: 10.5.1.6
+      gateway_effective:
+        public:
+          name: internal
+          ip: ""
+      dns:
+        private_domain: cluster.local
+      identity:
+        enabled: true
+      provisioning:
+        enabled: true
+        omni:
+          etcd_encryption_key: |
+            -----BEGIN PGP PRIVATE KEY BLOCK-----
+            dGVzdC1rZXktbWF0ZXJpYWw=
+            -----END PGP PRIVATE KEY BLOCK-----
+          initial_admins:
+            - admin@example.com
+    expectError: true
+
   # envoy driver keeps the chart's own dedicated LoadBalancer Service — gateway-routed
   # wireguard is cilium-only for now. The Service's own IP is unknowable ahead of an
   # apply, so dev mode's placeholder covers it.

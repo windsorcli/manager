@@ -755,6 +755,62 @@ cases:
             - components:
                 - harbor/gateway
 
+  # Core builds no external Gateway in certificate-only mode. The manager's core pin
+  # predates gateway_effective.public, so these cases set the value core computes.
+  - name: attaches the route to the internal gateway without an external one
+    values:
+      platform: metal
+      network: *default-network
+      cluster: *default-cluster
+      gateway: *default-gateway
+      gateway_effective:
+        public:
+          name: internal
+          ip: 10.5.1.5
+      dns:
+        private_domain: cluster.local
+      registry:
+        enabled: true
+        driver: harbor
+        harbor:
+          admin_password: supplied-by-operator
+    expect:
+      flux:
+        - name: registry
+          resources:
+            - components:
+                - harbor/gateway
+              substitutions:
+                external_domain: cluster.local
+                gateway_name: internal
+
+  - name: keeps the route on the external gateway when core builds one
+    values:
+      platform: metal
+      network: *default-network
+      cluster: *default-cluster
+      gateway: *default-gateway
+      gateway_effective:
+        public:
+          name: external
+          ip: 10.5.1.6
+      dns:
+        public_domain: example.com
+      registry:
+        enabled: true
+        driver: harbor
+        harbor:
+          admin_password: supplied-by-operator
+    expect:
+      flux:
+        - name: registry
+          resources:
+            - components:
+                - harbor/gateway
+              substitutions:
+                external_domain: example.com
+                gateway_name: external
+
   # telemetry.metrics.enabled adds both the metrics port/ServiceMonitor patch and the
   # shared manager-observability contribution (alerts + dashboard).
   - name: adds metrics and observability when metrics are enabled

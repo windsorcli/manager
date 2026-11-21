@@ -19,8 +19,9 @@ Installs the official `goharbor/harbor-helm` chart. Hard external dependencies:
   CA-bundle field to trust CNPG's own cluster CA with.
 - **A local admin password** outside dev mode — Harbor's local auth. SSO via Core's
   identity is wired through an admin-API Job when identity is enabled.
-- **A gateway.** Harbor's UI/API are reached through Core's canonical `external` Gateway,
-  TLS terminating there — Harbor itself serves plain HTTP.
+- **A gateway.** Harbor's UI/API are reached through Core's `external` Gateway, or its
+  `internal` Gateway when Core builds no external one. TLS terminates at the gateway;
+  Harbor itself serves plain HTTP.
 
 ## Storage
 
@@ -61,6 +62,7 @@ Factory's own route already sets.
 | `registry_region` | `distribution/s3` | Region embedded in the S3 v4 signature, from `object_store.region`. |
 | `registry_endpoint` | `distribution/s3` | S3 endpoint the distribution driver writes to, from `object_store.endpoint`. |
 | `external_domain` | `harbor/gateway` | Domain the gateway route publishes under; the hostname is `harbor.<external_domain>`. Public domain when set, otherwise the private domain or the cluster domain. |
+| `gateway_name` | `harbor/gateway` | Core Gateway the route attaches to, from Core's `gateway_effective.public.name`: `external` when Core builds one, else `internal`. |
 | `keycloak_realm` | `harbor/oidc` | Identity realm the OIDC client registers against, from `identity_effective.realm`. |
 | `oidc_issuer` | `harbor/oidc` | External OIDC discovery issuer, from `identity_effective.issuer`. |
 | `oidc_admin_group` | `harbor/oidc` | Keycloak group mapped to Harbor's admin role via the OIDC groups claim. Fixed at `platform-admins`. |
@@ -78,7 +80,7 @@ Factory's own route already sets.
 | `harbor` | `registry.driver` is `harbor` (default `distribution`) | Helm release of the official `goharbor/harbor-helm` chart in `harbor`. Local admin auth. |
 | `harbor/s3` | `registry.driver` is `harbor` and `object_store.driver` is `hetzner` or `aws` | Backs Harbor with a bucket from the platform's object store instead of a PVC. Own bucket, own destroy policy — not shared with the distribution driver's. |
 | `harbor/oidc` | `registry.driver` is `harbor`, `identity.enabled == true`, and `registry.harbor.sso` is not explicitly false | Admin-API Job that registers Harbor's OIDC client in the platform realm and configures Harbor for OIDC auth, group-mapped to `platform-admins`. A named `oidc` resources variant of the `registry` flux system (`registry-resources-oidc`) so it depends on identity without gating Harbor's install or gateway route. |
-| `harbor/gateway` | `registry.driver` is `harbor` and `gateway.enabled == true` | HTTPRoute on Core's canonical `external` Gateway. Lives in the resources tier and depends on `gateway-resources`. Without a gateway, reach Harbor by port-forwarding the `harbor` Service in `registry`. |
+| `harbor/gateway` | `registry.driver` is `harbor` and `gateway.enabled == true` | HTTPRoute on Core's `external` Gateway, or on `internal` when Core builds no external one (no `dns.public_domain`). Lives in the resources tier and depends on `gateway-install`. Without a gateway, reach Harbor by port-forwarding the `harbor` Service in `registry`. |
 | `harbor/proxy-cache` | `registry.driver` is `harbor` and `registry.harbor.proxy_cache` has at least one entry | Admin-API Job that creates a Harbor Registry endpoint and proxy-cache Project for each configured upstream. Shares the `admin-jobs` resources variant with `harbor/gc` — both depend only on Harbor's own install, unlike `harbor/oidc`, which also needs identity. |
 | `harbor/gc` | `registry.driver` is `harbor` and `registry.harbor.gc.enabled` is not explicitly false (default on) | Admin-API Job that sets Harbor's own GC schedule via its admin API. Harbor's jobservice runs GC on that schedule afterward; the Job only sets the schedule once. Shares the `admin-jobs` resources variant with `harbor/proxy-cache`. |
 | `harbor/image-factory` | `registry.driver` is `harbor` and `provisioning.image_factory.enabled == true` | Admin-API Job that creates an `image-factory` Harbor project and a scoped push/pull robot account, then writes a dockerconfigjson Secret in `provisioning` for the factory's own pod to mount. Needs RBAC to write that Secret cross-namespace — the only admin-API Job here that talks to the Kubernetes API, not just Harbor's. |

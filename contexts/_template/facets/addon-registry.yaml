@@ -93,6 +93,8 @@ config:
           ? (dns.private_domain ?? dns.domain ?? '')
           : dns.public_domain}
       port_suffix: "${workstation.runtime == 'docker-desktop' ? ':8443' : ''}"
+      # Core's public route target; cores without one always build the external Gateway.
+      route_gateway: "${gateway_effective.public.name ?? 'external'}"
 
   - name: harbor_effective
     when: (registry.driver ?? 'distribution') == 'harbor'
@@ -216,6 +218,7 @@ flux:
           - harbor/gateway
         substitutions:
           external_domain: "${registry_effective.route_domain}"
+          gateway_name: "${registry_effective.route_gateway}"
         timeout: 10m
         interval: 5m
 
