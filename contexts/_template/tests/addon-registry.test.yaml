@@ -835,10 +835,30 @@ cases:
               - harbor
               - harbor/prometheus
         - name: manager-observability
+          dependsOn:
+            - telemetry-install
+            - registry-install
           resources:
             - components:
                 - prometheus/alerts/harbor
                 - grafana/dashboards/harbor
+
+  # Harbor off: manager-observability still exists for metrics, but must not wait on
+  # registry-install, which doesn't exist in this context.
+  - name: leaves registry-install out of manager-observability dependsOn without harbor
+    values:
+      platform: metal
+      network: *default-network
+      cluster: *default-cluster
+      gateway: *default-gateway
+      telemetry:
+        metrics:
+          enabled: true
+    expect:
+      flux:
+        - name: manager-observability
+          dependsOn:
+            - telemetry-install
 
   # No metrics: neither the ServiceMonitor patch nor the manager-observability
   # contribution has anything to scrape.

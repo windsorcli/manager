@@ -149,10 +149,30 @@ cases:
               - image-factory
               - image-factory/prometheus
         - name: manager-observability
+          dependsOn:
+            - telemetry-install
+            - provisioning-base-install
           resources:
             - components:
                 - prometheus/alerts/image-factory
                 - grafana/dashboards/image-factory
+
+  # Provisioning off: manager-observability still exists for metrics, but must not wait
+  # on provisioning-base-install, which doesn't exist in this context.
+  - name: leaves provisioning-base-install out of manager-observability dependsOn without provisioning
+    values:
+      platform: metal
+      network: *default-network
+      cluster: *default-cluster
+      gateway: *default-gateway
+      telemetry:
+        metrics:
+          enabled: true
+    expect:
+      flux:
+        - name: manager-observability
+          dependsOn:
+            - telemetry-install
 
   # No metrics: neither the ServiceMonitor nor the manager-observability contribution
   # (which reads the factory's own metrics) has anything to scrape.
