@@ -147,22 +147,47 @@ config:
         ${provisioning.image_factory.external_url
           ?? ('https://factory.' + omni_effective.domain + omni_effective.external_port_suffix)}
 
-  # Core's public route target; cores without one always build the external Gateway.
+  # Core's public route target: external, else internal (never on hetzner), else none.
   - name: provisioning_gateway
     value:
-      name: "${gateway_effective.public.name ?? 'external'}"
-      ip: "${gateway_effective.public.ip ?? gateway.external.ip ?? network.loadbalancer_ips.start ?? ''}"
+      name: >-
+        ${(dns.public_domain ?? '') != '' || (gateway.external.enabled ?? false) == true ? 'external' :
+        (platform != 'hetzner' && ((dns.private_domain ?? '') != '' || (gateway.internal.enabled ?? false) == true) ?
+        'internal' : '')}
+      ip: >-
+        ${(dns.public_domain ?? '') != '' || (gateway.external.enabled ?? false) == true ? (gateway.external.ip ?? '') :
+        (platform != 'hetzner' && ((dns.private_domain ?? '') != '' || (gateway.internal.enabled ?? false) == true) ?
+        (gateway.internal.ip ?? '') : '')}
+
+  # Core's load balancer mode and controller, derived from the same schema inputs.
+  - name: provisioning_lb
+    value:
+      # nodeport when both gateways are NodePort; a tunnel makes the external one ClusterIP.
+      mode: >-
+        ${((tunnel.driver ?? '') == '' &&
+        (gateway.external.service_type ?? gateway.service_type ??
+        (workstation.runtime == 'docker-desktop' ? 'NodePort' : 'LoadBalancer')) == 'NodePort' &&
+        (gateway.internal.service_type ?? gateway.service_type ??
+        (workstation.runtime == 'docker-desktop' ? 'NodePort' : 'LoadBalancer')) == 'NodePort')
+        ? 'nodeport' : 'loadbalancer'}
+      # True where Core runs an lb-install controller: EKS, hetzner, or an enabled kube-vip or MetalLB.
+      controller_required: >-
+        ${(platform == 'aws' && (cluster.driver ?? 'eks') == 'eks') || platform == 'hetzner' ||
+        (workstation.runtime != 'docker-desktop' &&
+        ((gateway.external.service_type ?? gateway.service_type ?? 'LoadBalancer') != 'NodePort' ||
+        (gateway.internal.service_type ?? gateway.service_type ?? 'LoadBalancer') != 'NodePort') &&
+        (network.loadbalancer_driver ?? (cluster.cni.driver == 'cilium' ? 'cilium' : 'kube-vip')) in ['kube-vip', 'metallb'] &&
+        ((network.loadbalancer_driver ?? '') != '' || platform in ['metal', 'vsphere', 'hyperv', 'incus', 'proxmox']))}
 
   # SideroLink WireGuard exposure. On the cilium driver outside NodePort mode, the
   # omni-wireguard Gateway takes the address and LB-IPAM sharing-key of the Gateway
-  # the routes use, so both answer on one IP. Without gateway.external.ip, the
-  # external gateway sits at the first network.loadbalancer_ips address.
+  # the routes use, so both answer on one IP.
   - name: omni_wireguard
     value:
       port: "${provisioning.omni.wireguard.node_port ?? 30180}"
       gateway_routed: >-
-        ${lb_effective.mode != 'nodeport' && gateway.driver == 'cilium' &&
-        lb_effective.controller_required != true}
+        ${provisioning_lb.mode != 'nodeport' && gateway.driver == 'cilium' &&
+        provisioning_lb.controller_required != true}
       gateway_ip: "${provisioning_gateway.ip}"
       # First control-plane address. A remote device dials it, so 127.0.0.1 won't do.
       node_ip: >-
@@ -197,6 +222,15 @@ config:
       # docker-desktop reaches the gateway on 8443 rather than 443 — same port
       # image-factory's own external URL derivation appends.
       external_port_suffix: "${workstation.runtime == 'docker-desktop' ? ':8443' : ''}"
+      # Core's identity realm and back-channel issuer, derived from the identity settings.
+      keycloak_realm: "${identity.keycloak.realm ?? 'platform'}"
+      keycloak_backchannel_issuer: >-
+        ${(identity.driver ?? 'keycloak') == 'oidc' ? (identity.oidc.issuer ?? '') :
+        ('http://keycloak-service.system-identity:8080/realms/' + (identity.keycloak.realm ?? 'platform'))}
+      # Core creates keycloak-bootstrap-admin with an admin password, which dev sets by default.
+      keycloak_admin_secret: >-
+        ${(identity.keycloak.admin.password ?? '') != '' || dev == true
+          ? 'keycloak-bootstrap-admin' : 'keycloak-initial-admin'}
       # NodePort mode and the envoy driver keep the chart's own Service
       # (omni/nodeport, omni/loadbalancer).
       wireguard_node_port: "${omni_wireguard.port}"
@@ -206,7 +240,7 @@ config:
       # contexts hit the requires: check above.
       wireguard_advertised_endpoint: >-
         ${provisioning.omni.wireguard.advertised_endpoint ?? (
-          let host = lb_effective.mode == 'nodeport' ? omni_wireguard.node_ip
+          let host = provisioning_lb.mode == 'nodeport' ? omni_wireguard.node_ip
             : (omni_wireguard.gateway_routed == true ? omni_wireguard.gateway_ip : '');
           host != '' ? host + ':' + string(omni_wireguard.port)
             : (dev == true ? '0.0.0.0:' + string(omni_wireguard.port) : ''))}
@@ -322,7 +356,7 @@ flux:
   #     automation; only the key itself is unautomatable.
   #
   # Omni's own install has no identity-resources dependency: keycloak_saml_url is a
-  # plain computed string (identity_effective.backchannel_issuer), not a live call, so
+  # plain computed string (omni_effective.keycloak_backchannel_issuer), not a live call, so
   # the chart boots fine before the realm exists — SAML login just isn't functional
   # yet. Only the saml-client Job actually calls the realm's admin API, so only its
   # own resources variant below waits on identity-resources.
@@ -343,8 +377,8 @@ flux:
         - omni
         - "${provisioning_effective.omni_generated_key == true ? 'omni/etcd-key' : ''}"
         - "${provisioning_effective.metrics == true ? 'omni/prometheus' : ''}"
-        - "${lb_effective.mode == 'nodeport' ? 'omni/nodeport' : ''}"
-        - "${lb_effective.mode != 'nodeport' && gateway.driver != 'cilium' ? 'omni/loadbalancer' : ''}"
+        - "${provisioning_lb.mode == 'nodeport' ? 'omni/nodeport' : ''}"
+        - "${provisioning_lb.mode != 'nodeport' && gateway.driver != 'cilium' ? 'omni/loadbalancer' : ''}"
         - >-
           ${provisioning_effective.metrics == true && (provisioning.omni.service_account_key ?? '') != '' ?
           'omni/exporter' : ''}
@@ -373,7 +407,7 @@ flux:
         omni_wireguard_advertised_endpoint: "${omni_effective.wireguard_advertised_endpoint}"
         # The chart fetches this itself, server-side, so the internal (backchannel)
         # descriptor URL avoids depending on the gateway route being reachable.
-        keycloak_saml_url: "${identity_effective.backchannel_issuer}/protocol/saml/descriptor"
+        keycloak_saml_url: "${omni_effective.keycloak_backchannel_issuer}/protocol/saml/descriptor"
       timeout: 10m
       interval: 5m
     resources:
@@ -388,7 +422,7 @@ flux:
           # lbipam.cilium.io/sharing-key), not a listener added to core's Gateway:
           # two Kustomizations applying one object fight under Flux's single
           # field-manager identity.
-          - "${gateway.driver == 'cilium' && lb_effective.mode != 'nodeport' ? 'omni/gateway/wireguard' : ''}"
+          - "${gateway.driver == 'cilium' && provisioning_lb.mode != 'nodeport' ? 'omni/gateway/wireguard' : ''}"
         substitutions:
           external_domain: "${omni_effective.domain}"
           gateway_name: "${provisioning_gateway.name}"
@@ -407,10 +441,8 @@ flux:
         components:
           - omni/saml-client
         substitutions:
-          keycloak_realm: "${identity_effective.realm}"
-          keycloak_admin_secret: >-
-            ${(identity_effective.admin_password ?? '') != ''
-              ? 'keycloak-bootstrap-admin' : 'keycloak-initial-admin'}
+          keycloak_realm: "${omni_effective.keycloak_realm}"
+          keycloak_admin_secret: "${omni_effective.keycloak_admin_secret}"
           # crewjam/saml (Omni's SAML library) has no configured EntityID, so it
           # falls back to its own metadata URL as the issuer — not the bare root
           # URL — per samlsp.DefaultServiceProvider (samlsp/new.go): metadataURL :=
