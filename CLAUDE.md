@@ -4,7 +4,7 @@ Skills are defined in `.claude/skills/` and are discovered automatically by Clau
 
 ## Non-negotiable rules
 
-1. **Code comments** — describe current behavior and non-obvious constraints only. No issue/PR/ADR citations (`cli#3097`, `see ADR-0004`), no process or reasoning narrative ("this is what makes X possible"), no change history ("previously X, now Y"). If it wouldn't confuse a reader without the comment, don't write it. That reasoning belongs in the commit message or a docs/adr file, never in the code. **Hard cap: one line, ~15 words.** State the one non-obvious fact, not the chain of reasoning that led to it — no "and", "because X, so Y, which means Z" clause-chaining to smuggle in a second and third sentence. Two lines only if genuinely unavoidable, never three+. Match the comment density of the surrounding file. Before writing a comment, draft it, then cut it in half.
+1. **Code comments** — describe current behavior and non-obvious constraints only. No issue or PR citations (`cli#3097`), no process or reasoning narrative ("this is what makes X possible"), no change history ("previously X, now Y"). If it wouldn't confuse a reader without the comment, don't write it. That reasoning belongs in the commit message, never in the code. **Hard cap: one line, ~15 words.** State the one non-obvious fact, not the chain of reasoning that led to it — no "and", "because X, so Y, which means Z" clause-chaining to smuggle in a second and third sentence. Two lines only if genuinely unavoidable, never three+. Match the comment density of the surrounding file. Before writing a comment, draft it, then cut it in half.
 
    Bad (multi-clause, explains history/reasoning):
    ```
@@ -17,7 +17,7 @@ Skills are defined in `.claude/skills/` and are discovered automatically by Clau
    # nginx has no /metrics; harbor_health/harbor_up don't reflect its state.
    ```
 
-2. **The Core boundary** — follow `docs/adr/0001-layering-on-core.md`. Manager authors only what a fleet needs; a single-cluster capability belongs in Core. Turn Core capabilities on through context values, never redeclare a Core facet or schema key.
+2. **The Core boundary** — Manager authors only what a fleet needs; a single-cluster capability belongs in Core, and the Manager change waits on the Core change. Turn Core capabilities on through context values; never redeclare a Core facet. Name Manager components differently from Core's, and depend on Core's canonical names (`gateway-resources`, `pki-resources`), not driver-specific ones. Add only new schema keys: never redeclare a key Core owns, never add `$defs`.
 
 3. **Facet authoring** — follow `facet-author` for facet YAML structure, config layering, and `when:`/`requires:` conventions.
 

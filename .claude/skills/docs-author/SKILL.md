@@ -127,7 +127,3 @@ Reference: [kustomize/policy/](../../../kustomize/policy/) is the simplest multi
 - [ ] Generated Terraform docs refreshed if inputs/outputs changed.
 - [ ] Links to Blueprint schema/facets point at windsorcli.dev `/docs/blueprints/...`, not duplicate prose.
 - [ ] No slug or path that implies generic blueprint authoring—that belongs on the website repo.
-
-## Internal architecture note
-
-[windsorcli.github.io `docs/plan.md` on GitHub](https://github.com/windsorcli/windsorcli.github.io/blob/main/docs/plan.md) — maintainer planning only; not published on windsorcli.dev.

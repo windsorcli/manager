@@ -95,10 +95,9 @@ reaching for them:
 
 Sidero Labs' self-hosted fleet control plane for Talos — the system of record for every
 downstream cluster's identity, and the thing an operator actually drives to provision and
-manage them. See [ADR-0004](/docs/adr/0004-omni.md) for the deployment shape decisions:
-embedded etcd, own TLS, WireGuard-based SideroLink exposure, and SAML auth against Core's
-Keycloak realm rather than the OIDC path Omni's own group/role claim mapping doesn't support
-yet.
+manage them. It runs with embedded etcd and its own TLS, exposes SideroLink over WireGuard,
+and authenticates operators by SAML against Core's Keycloak realm, because Omni's group/role
+claim mapping doesn't support the OIDC path yet.
 
 Installs the Sidero Labs `omni` chart from `oci://ghcr.io/siderolabs/charts`. Hard external
 dependencies:
@@ -120,9 +119,9 @@ Three HTTPRoutes on the shared gateway — API/UI, Kubernetes proxy, and SideroL
 API — plus SideroLink's own WireGuard exposure, which varies by load-balancer mode: a
 dedicated NodePort or LoadBalancer Service everywhere the gateway driver is envoy or the
 cluster runs in NodePort mode, or a second Gateway sharing the routes' Gateway IP
-(`omni/gateway/wireguard`) when the driver is cilium — see
-[ADR-0005](/docs/adr/0005-siderolink-gateway-exposure.md) for why envoy doesn't get that
-same dedicated-Gateway path yet.
+(`omni/gateway/wireguard`) when the driver is cilium. Envoy doesn't get the dedicated
+Gateway: NodePort mode would need a second Kustomization to patch Core's shared EnvoyProxy
+object, and Cilium's LB-IPAM sharing-key, which the shared IP relies on, has no envoy equivalent.
 
 ### Image factory integration
 
@@ -260,4 +259,4 @@ provisioning:
   material into an internal registry first, which is Harbor's problem before it is this
   add-on's.
 - **Downstream cluster lifecycle ownership.** How Omni and Cluster API coexist for actually
-  provisioning clusters is ADR-0006, not yet written.
+  provisioning clusters is undecided.
