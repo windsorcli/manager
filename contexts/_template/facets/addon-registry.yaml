@@ -93,11 +93,6 @@ config:
           ? (dns.private_domain ?? dns.domain ?? '')
           : dns.public_domain}
       port_suffix: "${workstation.runtime == 'docker-desktop' ? ':8443' : ''}"
-      # Core's public route target: external, else internal (never on hetzner), else none.
-      route_gateway: >-
-        ${(dns.public_domain ?? '') != '' || (gateway.external.enabled ?? false) == true ? 'external' :
-        (platform != 'hetzner' && ((dns.private_domain ?? '') != '' || (gateway.internal.enabled ?? false) == true) ?
-        'internal' : '')}
 
   - name: harbor_effective
     when: (registry.driver ?? 'distribution') == 'harbor'
@@ -119,21 +114,6 @@ config:
         ${identity.enabled == true && (identity.driver ?? 'keycloak') == 'keycloak' &&
         gateway.enabled == true && (registry.harbor.sso ?? true) != false}
       gc: ${(registry.harbor.gc.enabled ?? true) != false}
-      # Core's identity realm and issuer, derived from the identity settings.
-      keycloak_realm: "${identity.keycloak.realm ?? 'platform'}"
-      # Core creates keycloak-bootstrap-admin with an admin password, which dev sets by default.
-      keycloak_admin_secret: >-
-        ${(identity.keycloak.admin.password ?? '') != '' || dev == true
-          ? 'keycloak-bootstrap-admin' : 'keycloak-initial-admin'}
-      # Core's external issuer: keycloak.<domain>, with :8443 or :8444 on docker-desktop.
-      oidc_issuer: >-
-        ${(identity.driver ?? 'keycloak') == 'oidc' ? (identity.oidc.issuer ?? '') :
-        (((identity.keycloak.hostname ?? '') == '' ?
-        ('https://keycloak.' +
-        ((dns.public_domain ?? '') == '' ? (dns.private_domain ?? '') : dns.public_domain) +
-        (workstation.runtime == 'docker-desktop' ? ((dns.public_domain ?? '') == '' ? ':8443' : ':8444') : '')) :
-        identity.keycloak.hostname) +
-        '/realms/' + (identity.keycloak.realm ?? 'platform'))}
 
 # =============================================================================
 # Flux system — the registry (harbor or distribution, whichever driver is active)
@@ -236,7 +216,7 @@ flux:
           - harbor/gateway
         substitutions:
           external_domain: "${registry_effective.route_domain}"
-          gateway_name: "${registry_effective.route_gateway}"
+          gateway_name: "${route_gateway.name}"
         timeout: 10m
         interval: 5m
 
@@ -253,9 +233,9 @@ flux:
           - harbor/oidc
         substitutions:
           harbor_hostname: "${harbor_effective.hostname}${registry_effective.port_suffix}"
-          keycloak_realm: "${harbor_effective.keycloak_realm}"
-          keycloak_admin_secret: "${harbor_effective.keycloak_admin_secret}"
-          oidc_issuer: "${harbor_effective.oidc_issuer}"
+          keycloak_realm: "${identity_client.realm}"
+          keycloak_admin_secret: "${identity_client.keycloak_admin_secret}"
+          oidc_issuer: "${identity_client.issuer}"
           oidc_admin_group: platform-admins
           oidc_verify_cert: "${dev == true ? false : true}"
         # At least the Job's own activeDeadlineSeconds (40m) — a shorter Flux
