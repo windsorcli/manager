@@ -402,7 +402,7 @@ workarounds instead of real DNS/PKI infrastructure.
 image-factory bug below, a registered machine was assigned to a new cluster through
 Omni's normal UI flow and, unassisted after that, finished a real bootstrap: etcd
 formed, the Kubernetes API came up, and the cluster reached `Running` /
-`Machines Healthy: 1/1`. Every layer of the stack this ADR describes — SideroLink,
+`Machines Healthy: 1/1`. Every layer of the stack this spike describes — SideroLink,
 the image factory, the gateway, the Private CA — works together correctly, not just
 in isolation.
 
