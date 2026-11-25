@@ -139,7 +139,7 @@ operator's browser use this same URL.
 | Name | Required when | Effect |
 |---|---|---|
 | `external_domain` | always | Domain the factory is served under; the hostname is `factory.<external_domain>`. Public domain when set, otherwise the private domain or the cluster domain. |
-| `gateway_name` | `image-factory/gateway`, `omni/gateway` | Core Gateway the routes attach to, and the omni-wireguard Gateway's LB-IPAM sharing-key, from Core's `gateway_effective.public.name`: `external` when Core builds one, else `internal`. |
+| `gateway_name` | `image-factory/gateway`, `omni/gateway` | Core Gateway the routes attach to, and the omni-wireguard Gateway's LB-IPAM sharing-key, the Gateway Core builds for public routes: `external` with `dns.public_domain` or `gateway.external.enabled`, else `internal`. |
 | `factory_schematic_registry` | always | OCI registry the factory pushes generated schematics to. Needs push access. Defaults to the registry capability (registry.driver, kustomize/registry/) unless provisioning.image_factory.registry.schematic.registry names an external one. |
 | `factory_schematic_namespace` | optional | Repository path prefix for schematics. Defaults to `siderolabs/image-factory`. |
 | `factory_schematic_repository` | optional | Repository name for schematics. Defaults to `schematics`. |
