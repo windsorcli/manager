@@ -4,8 +4,7 @@
 # instance over SideroLink, proving addon-provisioning.yaml's omni SideroLink path works
 # end to end.
 #
-# Background: docs/spikes/omni-docker-machine-registration.md has the full story of why
-# this exists in this shape. In short: a Docker container can't complete a SideroLink
+# Background: a Docker container can't complete a SideroLink
 # join at all (Talos's PLATFORM=container mode never brings up the WireGuard client), so
 # this drives talosctl's QEMU provisioner instead - which needs root for CNI bridge
 # networking and Hypervisor.framework acceleration, and needs a few workarounds to reach
@@ -102,7 +101,6 @@ case "$(uname -s)" in
   Darwin) ;;
   *)
     echo "error: this script drives talosctl's QEMU provisioner on macOS (Hypervisor.framework)." >&2
-    echo "  see docs/spikes/omni-docker-machine-registration.md for the Linux/CI story." >&2
     exit 1
     ;;
 esac
@@ -310,7 +308,7 @@ fi
 
 cat <<EOF
 
-$([ "$joined" = 1 ] && echo "SideroLink link established." || echo "No confirmation yet in the console log - it may still be retrying (this is normal on the first attempt; see docs/spikes/omni-docker-machine-registration.md, Problem 5).")
+$([ "$joined" = 1 ] && echo "SideroLink link established." || echo "No confirmation yet in the console log - it may still be retrying (this is normal on the first attempt).")
 Check Omni's Machines page (or Home -> Recent Machines) for "${NAME}-controlplane-1".
 
 Console log:  ${CONSOLE_LOG}

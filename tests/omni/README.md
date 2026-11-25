@@ -31,10 +31,7 @@ depends on. A real VM is the only thing that works locally, and getting one to
 actually complete a SideroLink join against Omni running behind Docker Desktop needed
 five separate fixes (DNS, TLS hostname validation, CA trust, the advertised WireGuard
 endpoint, and along the way a real bug in `addon-image-factory.yaml`'s installer
-registry config). This script automates all of it. The full story — every dead end,
-every root cause, every command used to diagnose it — is in
-[`docs/spikes/omni-docker-machine-registration.md`](../../docs/spikes/omni-docker-machine-registration.md).
-Read that first if something here breaks in a new way.
+registry config). This script automates all of it.
 
 ## Prerequisites
 
