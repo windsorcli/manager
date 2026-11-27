@@ -94,7 +94,7 @@ config:
           : dns.public_domain}
       port_suffix: "${workstation.runtime == 'docker-desktop' ? ':8443' : ''}"
       # Core's public route target; cores without one always build the external Gateway.
-      route_gateway: "${gateway_effective.public.name ?? 'external'}"
+      route_gateway: "${gateway_endpoints.public.name ?? 'external'}"
 
   - name: harbor_effective
     when: (registry.driver ?? 'distribution') == 'harbor'
@@ -235,11 +235,9 @@ flux:
           - harbor/oidc
         substitutions:
           harbor_hostname: "${harbor_effective.hostname}${registry_effective.port_suffix}"
-          keycloak_realm: "${identity_effective.realm}"
-          keycloak_admin_secret: >-
-            ${(identity_effective.admin_password ?? '') != ''
-              ? 'keycloak-bootstrap-admin' : 'keycloak-initial-admin'}
-          oidc_issuer: "${identity_effective.issuer}"
+          keycloak_realm: "${identity_provider.realm}"
+          keycloak_admin_secret: "${identity_provider.admin_secret ?? 'keycloak-initial-admin'}"
+          oidc_issuer: "${identity_provider.issuer}"
           oidc_admin_group: platform-admins
           oidc_verify_cert: "${dev == true ? false : true}"
         # At least the Job's own activeDeadlineSeconds (40m) — a shorter Flux

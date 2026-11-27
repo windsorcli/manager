@@ -1133,7 +1133,7 @@ cases:
                 wireguard_gateway_ip: "10.5.1.6"
 
   # Core builds no external Gateway in certificate-only mode (dns.public.driver with
-  # no dns.public_domain). The manager's core pin predates gateway_effective.public,
+  # no dns.public_domain). The manager's core pin predates gateway_endpoints.public,
   # so these cases set the value core computes.
   - name: attaches routes and wireguard to the internal gateway without an external one
     values:
@@ -1152,7 +1152,7 @@ cases:
           ip: 10.5.1.5
         external:
           ip: 10.5.1.6
-      gateway_effective:
+      gateway_endpoints:
         public:
           name: internal
           ip: 10.5.1.5
@@ -1207,7 +1207,7 @@ cases:
           ip: 10.5.1.5
         external:
           ip: 10.5.1.6
-      gateway_effective:
+      gateway_endpoints:
         public:
           name: external
           ip: 10.5.1.6
@@ -1261,7 +1261,7 @@ cases:
         driver: cilium
         external:
           ip: 10.5.1.6
-      gateway_effective:
+      gateway_endpoints:
         public:
           name: internal
           ip: ""

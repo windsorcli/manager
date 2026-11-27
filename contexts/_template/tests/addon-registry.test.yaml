@@ -756,14 +756,14 @@ cases:
                 - harbor/gateway
 
   # Core builds no external Gateway in certificate-only mode. The manager's core pin
-  # predates gateway_effective.public, so these cases set the value core computes.
+  # predates gateway_endpoints.public, so these cases set the value core computes.
   - name: attaches the route to the internal gateway without an external one
     values:
       platform: metal
       network: *default-network
       cluster: *default-cluster
       gateway: *default-gateway
-      gateway_effective:
+      gateway_endpoints:
         public:
           name: internal
           ip: 10.5.1.5
@@ -790,7 +790,7 @@ cases:
       network: *default-network
       cluster: *default-cluster
       gateway: *default-gateway
-      gateway_effective:
+      gateway_endpoints:
         public:
           name: external
           ip: 10.5.1.6

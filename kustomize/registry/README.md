@@ -62,9 +62,9 @@ Factory's own route already sets.
 | `registry_region` | `distribution/s3` | Region embedded in the S3 v4 signature, from `object_store.region`. |
 | `registry_endpoint` | `distribution/s3` | S3 endpoint the distribution driver writes to, from `object_store.endpoint`. |
 | `external_domain` | `harbor/gateway` | Domain the gateway route publishes under; the hostname is `harbor.<external_domain>`. Public domain when set, otherwise the private domain or the cluster domain. |
-| `gateway_name` | `harbor/gateway` | Core Gateway the route attaches to, from Core's `gateway_effective.public.name`: `external` when Core builds one, else `internal`. |
-| `keycloak_realm` | `harbor/oidc` | Identity realm the OIDC client registers against, from `identity_effective.realm`. |
-| `oidc_issuer` | `harbor/oidc` | External OIDC discovery issuer, from `identity_effective.issuer`. |
+| `gateway_name` | `harbor/gateway` | Core Gateway the route attaches to, from Core's `gateway_endpoints.public.name`: `external` when Core builds one, else `internal`. |
+| `keycloak_realm` | `harbor/oidc` | Identity realm the OIDC client registers against, from `identity_provider.realm`. |
+| `oidc_issuer` | `harbor/oidc` | External OIDC discovery issuer, from `identity_provider.issuer`. |
 | `oidc_admin_group` | `harbor/oidc` | Keycloak group mapped to Harbor's admin role via the OIDC groups claim. Fixed at `platform-admins`. |
 | `oidc_verify_cert` | `harbor/oidc` | Whether Harbor verifies the identity provider's TLS certificate. False only in dev mode. |
 | `gc_schedule` | `harbor/gc` | Cron expression for Harbor's GC schedule, from `registry.harbor.gc.schedule`. 6 fields, seconds first. |
