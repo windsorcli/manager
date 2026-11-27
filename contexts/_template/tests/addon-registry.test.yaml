@@ -7,7 +7,7 @@
 x-defaults:
   network: &default-network
     cidr_block: 10.5.0.0/16
-    loadbalancer_driver: kube-vip
+    loadbalancer_driver: cilium
     loadbalancer_mode: arp
     loadbalancer_ips:
       start: "10.5.1.10"
@@ -25,7 +25,26 @@ x-defaults:
       volumes:
         - /var/mnt/local
 
+  aws-cluster: &aws-cluster
+    driver: eks
+
+  # EKS keeps the provider CNI and the AWS load balancer controller.
+  aws-network: &aws-network
+    cidr_block: 10.5.0.0/16
+
   gateway: &default-gateway
+    enabled: true
+    driver: envoy
+    internal:
+      ip: 10.5.1.5
+
+  # Core requires a gateway address on metal.
+  metal-gateway: &metal-gateway
+    internal:
+      ip: 10.5.1.5
+
+  # The cloud load balancer assigns the gateway address.
+  cloud-gateway: &cloud-gateway
     enabled: true
     driver: envoy
 
@@ -483,7 +502,7 @@ cases:
         network_zone: eu-central
       network: *default-network
       cluster: *default-cluster
-      gateway: *default-gateway
+      gateway: *cloud-gateway
       registry:
         enabled: true
     expect:
@@ -619,7 +638,7 @@ cases:
         network_zone: eu-central
       network: *default-network
       cluster: *default-cluster
-      gateway: *default-gateway
+      gateway: *cloud-gateway
       registry:
         enabled: true
         driver: harbor
@@ -657,7 +676,7 @@ cases:
         network_zone: eu-central
       network: *default-network
       cluster: *default-cluster
-      gateway: *default-gateway
+      gateway: *cloud-gateway
       registry:
         enabled: true
         driver: harbor
@@ -671,11 +690,11 @@ cases:
     values:
       id: tst1
       platform: aws
-      network: *default-network
-      cluster: *default-cluster
+      network: *aws-network
+      cluster: *aws-cluster
       aws:
         region: us-west-2
-      gateway: *default-gateway
+      gateway: *cloud-gateway
       registry:
         enabled: true
         driver: harbor
@@ -755,18 +774,13 @@ cases:
             - components:
                 - harbor/gateway
 
-  # Core builds no external Gateway in certificate-only mode. The manager's core pin
-  # predates gateway_endpoints.public, so these cases set the value core computes.
+  # Core builds no external Gateway without dns.public_domain.
   - name: attaches the route to the internal gateway without an external one
     values:
       platform: metal
       network: *default-network
       cluster: *default-cluster
       gateway: *default-gateway
-      gateway_endpoints:
-        public:
-          name: internal
-          ip: 10.5.1.5
       dns:
         private_domain: cluster.local
       registry:
@@ -786,13 +800,13 @@ cases:
 
   - name: keeps the route on the external gateway when core builds one
     values:
+      dev: true
       platform: metal
       network: *default-network
       cluster: *default-cluster
-      gateway: *default-gateway
-      gateway_endpoints:
-        public:
-          name: external
+      gateway:
+        <<: *default-gateway
+        external:
           ip: 10.5.1.6
       dns:
         public_domain: example.com

@@ -13,7 +13,7 @@ metadata:
 # this bump at all), so that value is deliberately excluded.
 when: >-
   ((workstation.runtime ?? '') == 'colima' || (workstation.runtime ?? '') == 'docker-desktop')
-  && cluster_node_counts.workers == 0
+  && (cluster.workers.count ?? (len(cluster.workers.nodes ?? {}) > 0 ? len(cluster.workers.nodes) : (platform == 'hetzner' ? 1 : 0))) == 0
   && ((provisioning.enabled ?? false) == true || (registry.enabled ?? false) == true)
 
 config:

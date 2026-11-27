@@ -1,0 +1,22 @@
+kind: Facet
+apiVersion: blueprints.windsorcli.dev/v1alpha1
+metadata:
+  name: route-gateway
+  description: Resolves the Core Gateway that Manager's browser-facing routes attach to
+
+# =============================================================================
+# Config — route gateway
+# =============================================================================
+config:
+
+  # Core's public route target: external, else internal (never on hetzner), else none.
+  - name: route_gateway
+    value:
+      name: >-
+        ${(dns.public_domain ?? '') != '' || (gateway.external.enabled ?? false) == true ? 'external' :
+        (platform != 'hetzner' && ((dns.private_domain ?? '') != '' || (gateway.internal.enabled ?? false) == true) ?
+        'internal' : '')}
+      ip: >-
+        ${(dns.public_domain ?? '') != '' || (gateway.external.enabled ?? false) == true ? (gateway.external.ip ?? '') :
+        (platform != 'hetzner' && ((dns.private_domain ?? '') != '' || (gateway.internal.enabled ?? false) == true) ?
+        (gateway.internal.ip ?? '') : '')}

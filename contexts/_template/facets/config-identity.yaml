@@ -1,0 +1,33 @@
+kind: Facet
+apiVersion: blueprints.windsorcli.dev/v1alpha1
+metadata:
+  name: identity-client
+  description: Resolves the Core identity realm and issuers that Manager's SSO clients register against
+
+when: identity.enabled == true
+
+# =============================================================================
+# Config — identity client
+# =============================================================================
+config:
+
+  - name: identity_client
+    value:
+      realm: "${identity.keycloak.realm ?? 'platform'}"
+      # Core creates keycloak-bootstrap-admin with an admin password, which dev sets by default.
+      keycloak_admin_secret: >-
+        ${(identity.keycloak.admin.password ?? '') != '' || dev == true
+          ? 'keycloak-bootstrap-admin' : 'keycloak-initial-admin'}
+      # keycloak.<domain>, with :8443 or :8444 on docker-desktop, unless identity.keycloak.hostname is set.
+      issuer: >-
+        ${(identity.driver ?? 'keycloak') == 'oidc' ? (identity.oidc.issuer ?? '') :
+        (((identity.keycloak.hostname ?? '') == '' ?
+        ('https://keycloak.' +
+        ((dns.public_domain ?? '') == '' ? (dns.private_domain ?? '') : dns.public_domain) +
+        (workstation.runtime == 'docker-desktop' ? ((dns.public_domain ?? '') == '' ? ':8443' : ':8444') : '')) :
+        identity.keycloak.hostname) +
+        '/realms/' + (identity.keycloak.realm ?? 'platform'))}
+      # Keycloak's cluster Service, since the external URL doesn't resolve in the cluster.
+      backchannel_issuer: >-
+        ${(identity.driver ?? 'keycloak') == 'oidc' ? (identity.oidc.issuer ?? '') :
+        ('http://keycloak-service.system-identity:8080/realms/' + (identity.keycloak.realm ?? 'platform'))}
